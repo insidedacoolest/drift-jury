@@ -13,7 +13,11 @@
 
 local M = {}
 
-local entries = {} -- carIndex -> { name, score, valid, line, angle, styleSpeed }
+-- Keyed by driver name, not car slot: slots get reused when someone leaves
+-- and another driver joins, which would otherwise hand the newcomer the
+-- previous driver's name and best score.
+local entries = {} -- driverName -> { name, score, valid, line, angle, styleSpeed }
+local ownBest = nil
 
 local broadcast = ac.OnlineEvent({
   ac.StructItem.key('driftFactoryJudgeApp_runResult'),
@@ -24,12 +28,13 @@ local broadcast = ac.OnlineEvent({
   styleSpeed = ac.StructItem.float(),
 }, function(sender, data)
   local carIndex = sender and sender.index or 0
-  local existing = entries[carIndex]
+  local name = ac.getDriverName(carIndex) or ('Car ' .. carIndex)
+  local existing = entries[name]
   if existing and not (data.valid and (not existing.valid or data.score > existing.score)) then
     return
   end
-  entries[carIndex] = {
-    name = ac.getDriverName(carIndex) or ('Car ' .. carIndex),
+  entries[name] = {
+    name = name,
     score = data.score,
     valid = data.valid,
     line = data.line,
@@ -42,19 +47,26 @@ end)
 -- A no-op over the network while offline (nothing else is listening), but
 -- still updates this client's own leaderboard entry either way.
 --
--- `repeatForNewConnections = true` makes CSP remember this as our current
--- "sticky" broadcast and auto-resend it to anyone who joins the server
--- later in the session — without it, a player joining after you'd never
--- see your score at all, since OnlineEvent only delivers messages sent
--- *after* you're connected, not anything broadcast earlier.
+-- `repeatForNewConnections = true` makes CSP remember the last message sent
+-- and auto-resend it to anyone who joins later — so the message sent must
+-- be this driver's *best* valid run, not just the latest one, or a bad last
+-- run is what everyone joining afterwards sees. Runs that don't beat the
+-- best aren't sent at all; until a valid run exists, the latest attempt is
+-- sent so the driver still shows up.
 function M.report(score)
-  broadcast({
+  local payload = {
     score = score.score or 0,
     valid = score.valid or false,
     line = score.line or 0,
     angle = score.angle or 0,
     styleSpeed = score.styleSpeed or 0,
-  }, true)
+  }
+  if payload.valid and (not ownBest or payload.score > ownBest.score) then
+    ownBest = payload
+  elseif ownBest then
+    return
+  end
+  broadcast(payload, true)
 end
 
 -- Best-score-first list of every driver seen this session.

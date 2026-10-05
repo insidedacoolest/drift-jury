@@ -20,6 +20,11 @@ Original DriftJudging SP: https://www.patreon.com/DeadEndReece/posts/driftjudges
   convenience (CSP itself blocks moving your own car via script once
   connected to a multiplayer server) — online, the driver lines up at the
   start manually instead of being auto-placed there.
+- Online, layouts come from an official, admin-published source (see
+  README.md, "Official layouts") instead of each player's local file, and
+  the editing tabs are restricted to the server admin.
+- Shared session leaderboard between players online, Portuguese
+  translation, and a redesigned score HUD.
 - (Further changes get listed here as they're made.)
 
 ## Known limitation carried over from this fork

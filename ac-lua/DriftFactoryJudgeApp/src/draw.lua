@@ -247,7 +247,9 @@ function M.hud(context, windowMode)
 
   if session.state == 'countdown' then
     local center = vec2(p1.x + width * 0.5, p1.y + height * 0.58)
-    local phase = session.countdownRemaining - math.floor(session.countdownRemaining)
+    -- countdownRemaining decreases, so its fractional part runs 1 -> 0 each
+    -- second; inverted so the ring starts small and expands/fades instead.
+    local phase = 1 - (session.countdownRemaining - math.floor(session.countdownRemaining))
     pulseRing(center, 34, phase, accent)
     pulseRing(center, 34, (phase + 0.5) % 1, accent)
     text('PREPARA-TE', 18, p1 + vec2(24, 12), accent)

@@ -22,6 +22,31 @@ own car via script once connected to a server) — online, drive to the start
 circle yourself before pressing the horn; everything else (judging, editor,
 results) works the same as offline. Details in [CREDITS.md](CREDITS.md).
 
+## Official layouts (online)
+
+Online, the app never uses a player's own locally edited layout. It downloads
+the official layout for the current track from this repository —
+`layouts/<track>/<layout>.json`, served from
+`raw.githubusercontent.com/insidedacoolest/drift-jury/master/` — so everyone
+on a server is judged against the same layout and scoring targets. No server
+configuration is needed.
+
+- The last successful download is cached locally and used if GitHub can't be
+  reached.
+- A download that finishes mid-run is applied once the run ends.
+- A track with no published layout shows "Ainda não há layout para esta
+  pista" and can't be run online.
+- Online, only the server admin sees the editing tabs (Editor de Layout,
+  Configuração do Carro, Calibração). Offline everything stays open, for
+  preparing tracks.
+
+**Publishing a track:** prepare it offline in the Layout Editor and press
+`Guardar Layout`. That writes
+`Documents/Assetto Corsa/cfg/extension/state/lua/app/DriftFactoryJudgeApp/layouts/<track>/<layout>.json`;
+copy that file unchanged to `layouts/<track>/<layout>.json` at the root of
+this repository and push to `master`. Players pick it up the next time they
+load into that track (GitHub's raw CDN can take a few minutes to refresh).
+
 ## NOTES:
 Sometimes right clicking a node will glitch the camera out, to get the best results make sure you are directly on top of it and then delete it.
 Sometimes Recorded road paths will "Float", I think its a map mesh issue but you can just go back at a different angle to adjust it to the position.

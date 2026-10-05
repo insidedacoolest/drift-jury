@@ -413,7 +413,7 @@ function M.scoreLead(samples, layout, config, penalties, invalid, reason)
     fluidityQuality = style.fluidity * engaged * 100,
     exactWheelCoverage = average(bins, function(sample) return sample.exactWheelCoverage or 0 end) * 100,
     valid = true,
-    reason = 'Valid'
+    reason = 'Válida'
   }
 end
 

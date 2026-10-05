@@ -74,9 +74,22 @@ local function runTab(context)
   heading('Sessão Atual')
   ui.text('Pista: ' .. context.track .. ' / ' .. context.layoutID)
   ui.text('Carro: ' .. context.carID)
+  local sourceLabels = {
+    ['local'] = 'Layout local (edição)',
+    official = 'Layout oficial',
+    ['official-cached'] = 'Layout oficial (cópia guardada)',
+    ['official-missing'] = 'Layout oficial indisponível',
+  }
+  muted(sourceLabels[context.layoutSource] or '')
+  if context.layoutStatus then muted(context.layoutStatus) end
   local available = environment(context)
   local errors = Model.validateLayout(context.layout)
-  if #errors > 0 then
+  if context.layoutSource == 'official-missing' then
+    -- Not something the player can fix by editing — the track just hasn't
+    -- been published yet (or the download hasn't finished).
+    ui.newLine()
+    ui.textColored('Ainda não há layout para esta pista.', rgbm(1, 0.65, 0.2, 1))
+  elseif #errors > 0 then
     ui.newLine()
     ui.textColored('O layout não está pronto:', rgbm(1, 0.65, 0.2, 1))
     for _, errorMessage in ipairs(errors) do ui.bulletText(errorMessage) end
@@ -439,10 +452,11 @@ end
 function M.window(context)
   local sim = ac.getSim()
   local isAdmin = sim and sim.isAdmin == true
-  -- Admin-gating only matters once other players are around to protect the
-  -- shared layout from — offline (practice/testing alone), there's no one
-  -- else to restrict, so editing stays open regardless of the admin flag.
-  local canEditLayout = isAdmin or not (sim and sim.isOnlineRace)
+  -- Everything that changes what a run is judged against (layout, scoring
+  -- targets, calibration) is admin-only once online — otherwise any player
+  -- could lower their own targets and inflate what they broadcast to the
+  -- shared leaderboard. Offline there's no one else to restrict.
+  local canEdit = isAdmin or not (sim and sim.isOnlineRace)
 
   ui.textColored('Drift Factory Judge App', rgbm(0.25, 0.8, 1, 1))
   sameLine()
@@ -456,18 +470,17 @@ function M.window(context)
     ui.textWrapped(context.status)
     ui.separator()
   end
-  saveWarning(context)
-  if context.dirty then ui.separator() end
+  if canEdit then
+    saveWarning(context)
+    if context.dirty then ui.separator() end
+  end
   ui.tabBar('DriftFactoryJudgeAppTabs', function()
     ui.tabItem('Corrida', function() runTab(context) end)
-    -- Editing the shared track layout (gates, zones, scoring profiles) is
-    -- admin-only once online with others — everyone else only gets to run
-    -- and see results, not change what a run is judged against.
-    if canEditLayout then
+    if canEdit then
       ui.tabItem('Editor de Layout', function() editorTab(context) end)
+      ui.tabItem('Configuração do Carro', function() carSetupTab(context) end)
+      ui.tabItem('Calibração', function() calibrationTab(context) end)
     end
-    ui.tabItem('Configuração do Carro', function() carSetupTab(context) end)
-    ui.tabItem('Calibração', function() calibrationTab(context) end)
     ui.tabItem('Resultados', function() resultsTab(context) end)
     ui.tabItem('Classificação', function() leaderboardTab(context) end)
   end)

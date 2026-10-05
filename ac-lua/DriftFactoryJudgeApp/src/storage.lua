@@ -32,6 +32,7 @@ function M.new(track, layoutID, carID, appRoot)
     layoutID = layoutID,
     carID = carID,
     layoutPath = U.joinPath(root, 'layouts', trackPart, layoutPart .. '.json'),
+    officialCachePath = U.joinPath(root, 'official-layouts', trackPart, layoutPart .. '.json'),
     bundledLayoutPath = bundledLayoutPath,
     resultsPath = U.joinPath(root, 'results', trackPart, layoutPart, carPart .. '.json'),
     hudSettingsPath = U.joinPath(root, 'hud-settings.json')
@@ -57,6 +58,19 @@ function M:saveLayout(layout)
   local encoded, encodeError = U.encodeJsonPretty(Model.toStorageLayout(layout))
   if not encoded then return false, encodeError end
   return U.atomicWrite(self.layoutPath, encoded)
+end
+
+-- Last official layout successfully downloaded for this track — kept apart
+-- from the player's own editable layout so an offline session never mixes
+-- the two, and used online when the download itself fails.
+function M:loadOfficialCache()
+  local loaded = loadJsonWithBackup(self.officialCachePath)
+  return loaded and Model.normalizeLayout(loaded, self.track, self.layoutID) or nil
+end
+
+function M:saveOfficialCache(layout)
+  local encoded = U.encodeJsonPretty(Model.toStorageLayout(layout))
+  if encoded then U.atomicWrite(self.officialCachePath, encoded) end
 end
 
 function M:loadResults()
