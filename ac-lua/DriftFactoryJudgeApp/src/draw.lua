@@ -126,12 +126,59 @@ local function fill(p1, p2, color, rounding)
   ui.drawRectFilled(p1, p2, color, rounding or 5)
 end
 
-local function text(value, size, position, color)
+-- Brand typefaces (driftfactory.pt), shipped as TTFs in the app's fonts/
+-- folder under the SIL Open Font License: Saira for titles and big numbers,
+-- JetBrains Mono for small readouts so digits keep a fixed width. Built
+-- lazily; if CSP can't build them, everything falls back to its default font.
+local FONTS_DIR = './fonts'
+local brandFonts = nil
+
+local function fontFor(role)
+  if brandFonts == nil then
+    brandFonts = false
+    if ui.DWriteFont and ui.pushDWriteFont then
+      local ok, result = pcall(function()
+        local weight = ui.DWriteFont.Weight
+        return {
+          title = ui.DWriteFont('Saira', FONTS_DIR):weight(weight.SemiBold),
+          number = ui.DWriteFont('Saira', FONTS_DIR):weight(weight.Bold),
+          mono = ui.DWriteFont('JetBrains Mono', FONTS_DIR):weight(weight.Medium),
+          monoBold = ui.DWriteFont('JetBrains Mono', FONTS_DIR):weight(weight.Bold),
+        }
+      end)
+      if ok then brandFonts = result end
+    end
+  end
+  return brandFonts and role and brandFonts[role] or nil
+end
+
+local function withFont(role, drawFn)
+  local font = fontFor(role)
+  if font then ui.pushDWriteFont(font) end
+  drawFn()
+  if font then ui.popDWriteFont() end
+end
+
+local function text(value, size, position, color, role)
   if ui.dwriteDrawText then
-    ui.dwriteDrawText(value, size, position, color)
+    withFont(role, function() ui.dwriteDrawText(value, size, position, color) end)
   else
     ui.setCursor(position)
     ui.textColored(value, color)
+  end
+end
+
+-- Text placed inside a box with real alignment, so numbers and labels land
+-- where the layout says instead of depending on font metrics. Falls back to
+-- top-left placement on CSP builds without the clipped DWrite call.
+local function textIn(value, size, boxMin, boxMax, hAlign, vAlign, color, role)
+  if ui.dwriteDrawTextClipped and ui.Alignment then
+    withFont(role, function()
+      ui.dwriteDrawTextClipped(value, size, boxMin, boxMax,
+        ui.Alignment[hAlign or 'Start'], ui.Alignment[vAlign or 'Center'], false, color)
+    end)
+  else
+    text(value, size, boxMin, color, role)
   end
 end
 
@@ -154,8 +201,9 @@ local function withAlpha(color, alpha)
 end
 
 -- Expanding, fading ring — used to give the countdown a "pulse" every second.
-local function pulseRing(center, baseRadius, phase, color)
-  ui.drawCircle(center, baseRadius + phase * 22, withAlpha(color, 1 - phase), 40, 2.5)
+-- `grow` bounds the expansion so the ring never leaves the panel.
+local function pulseRing(center, baseRadius, grow, phase, color)
+  ui.drawCircle(center, baseRadius + phase * grow, withAlpha(color, 1 - phase), 40, 2.5)
 end
 
 local function arc(center, radius, angleFrom, angleTo, color, thickness)
@@ -189,14 +237,15 @@ local function angleGauge(center, radius, valueDeg, maxDeg, targetDeg, trackColo
   ui.drawCircleFilled(tip, 5, needleColor)
 end
 
--- Radiating "speed lines" bursting from a point, fading out — the flourish
--- that fires once on a new personal best.
+-- A fan of "speed lines" shooting out to the right of the score, fading out —
+-- the flourish that fires once on a new personal best. The inner radius
+-- keeps the lines clear of the number itself.
 local function speedBurst(center, phase, color)
-  local count = 10
-  local innerRadius, outerRadius = 20 + phase * 10, 70 + phase * 90
+  local count = 7
+  local innerRadius, outerRadius = 46 + phase * 10, 58 + phase * 30
   local alpha = 1 - phase
   for i = 1, count do
-    local angle = (i / count) * math.pi * 2 + phase * 0.6
+    local angle = -0.7 + (i - 1) / (count - 1) * 1.4
     local dir = vec2(math.cos(angle), math.sin(angle))
     local a = center + dir * innerRadius
     local b = center + dir * outerRadius
@@ -205,7 +254,7 @@ local function speedBurst(center, phase, color)
 end
 
 function M.hudWindowSize(context)
-  local panelHeight = context and M.hudSize(context) or 178
+  local panelHeight = context and select(2, M.hudSize(context)) or 178
   if context and not context.session:isBusy() and context.session.resultAge >= 4 then
     panelHeight = 70
   end
@@ -228,9 +277,9 @@ function M.hud(context, windowMode)
     fill(p1, p2, BRAND.panelBg, 4)
     accentStripe(p1, vec2(p1.x, p2.y), BRAND.accent)
     cornerWedge(vec2(p2.x, p1.y), 18, BRAND.accent2)
-    text('HUD', 18, p1 + vec2(24, 12), BRAND.accent)
-    text('Aparece durante a contagem decrescente, runs e resultados.', 13,
-      p1 + vec2(24, 40), BRAND.muted)
+    textIn('HUD', 18, p1 + vec2(24, 8), p1 + vec2(340, 32), 'Start', 'Center', BRAND.accent, 'title')
+    textIn('Aparece na contagem, na run e no resultado.', 13,
+      p1 + vec2(24, 36), p1 + vec2(width - 24, 58), 'Start', 'Center', BRAND.muted, 'mono')
     return
   end
   local sim = ac.getSim()
@@ -246,28 +295,38 @@ function M.hud(context, windowMode)
   cornerWedge(vec2(p2.x, p1.y), 18, accent)
 
   if session.state == 'countdown' then
-    local center = vec2(p1.x + width * 0.5, p1.y + height * 0.58)
+    -- Ring and digit share one center on the right; the left column holds
+    -- the text, so neither can run into the other.
+    local center = vec2(p2.x - 72, p1.y + height * 0.5)
     -- countdownRemaining decreases, so its fractional part runs 1 -> 0 each
     -- second; inverted so the ring starts small and expands/fades instead.
     local phase = 1 - (session.countdownRemaining - math.floor(session.countdownRemaining))
-    pulseRing(center, 34, phase, accent)
-    pulseRing(center, 34, (phase + 0.5) % 1, accent)
-    text('PREPARA-TE', 18, p1 + vec2(24, 12), accent)
-    text(tostring(math.max(1, math.ceil(session.countdownRemaining))), 52,
-      vec2(center.x - 16, center.y - 30), BRAND.text)
+    pulseRing(center, 22, 16, phase, accent)
+    pulseRing(center, 22, 16, (phase + 0.5) % 1, accent)
+    ui.drawCircle(center, 22, withAlpha(BRAND.text, 0.25), 40, 1.5)
+    textIn('PREPARA-TE', 18, p1 + vec2(24, 8), p1 + vec2(230, 32), 'Start', 'Center', accent, 'title')
+    textIn('A run começa no zero.', 13, p1 + vec2(24, 34), p1 + vec2(230, 54), 'Start', 'Center', BRAND.muted, 'mono')
+    -- Box nudged up a little: DWrite centers the line box, and digits sit
+    -- low inside it.
+    textIn(tostring(math.max(1, math.ceil(session.countdownRemaining))), 36,
+      center - vec2(30, 33), center + vec2(30, 27), 'Center', 'Center', BRAND.text, 'number')
     if session.penalties > 0 then
-      text('PENALIZAÇÃO DE PARTIDA ANTECIPADA', 13, p1 + vec2(24, height - 24), BRAND.accent2)
+      textIn(string.format('PARTIDA ANTECIPADA  −%d', session.penalties), 13,
+        p1 + vec2(24, height - 32), p1 + vec2(230, height - 10), 'Start', 'Center', BRAND.accent2, 'monoBold')
     end
   elseif session.state == 'running' then
     local sample = session.samples[#session.samples]
-    text('RUN A SOLO', 18, p1 + vec2(24, 12), accent)
-    text(string.format('%.1fs', session.runElapsed), 18, p2 - vec2(70, height - 14), BRAND.muted)
+    local gaugeCenter, gaugeRadius = vec2(p2.x - 64, p1.y + 56), 34
+    textIn('RUN A SOLO', 18, p1 + vec2(24, 8), p1 + vec2(150, 32), 'Start', 'Center', accent, 'title')
+    -- Elapsed time ends left of the gauge so it can't overlap its arc.
+    textIn(string.format('%.1fs', session.runElapsed), 16,
+      p1 + vec2(150, 8), vec2(gaugeCenter.x - gaugeRadius - 14, p1.y + 32), 'End', 'Center', BRAND.muted, 'mono')
     if sample then
-      text(string.format('%.0f°', sample.angleDeg), 34, p1 + vec2(24, 42), BRAND.text)
-      text('ÂNGULO', 12, p1 + vec2(24, 82), BRAND.muted)
-      text(string.format('%.0f', sample.speedKmh), 34, p1 + vec2(150, 42), BRAND.text)
-      text('KM/H', 12, p1 + vec2(150, 82), BRAND.muted)
-      angleGauge(vec2(p2.x - 66, p1.y + 66), 40, sample.angleDeg, 90,
+      textIn(string.format('%.0f°', sample.angleDeg), 34, p1 + vec2(24, 38), p1 + vec2(130, 78), 'Start', 'Center', BRAND.text, 'number')
+      textIn('ÂNGULO', 12, p1 + vec2(24, 78), p1 + vec2(130, 94), 'Start', 'Center', BRAND.muted, 'title')
+      textIn(string.format('%.0f', sample.speedKmh), 34, p1 + vec2(140, 38), p1 + vec2(250, 78), 'Start', 'Center', BRAND.text, 'number')
+      textIn('KM/H', 12, p1 + vec2(140, 78), p1 + vec2(250, 94), 'Start', 'Center', BRAND.muted, 'title')
+      angleGauge(gaugeCenter, gaugeRadius, sample.angleDeg, 90,
         context.scoring.targetAngleDeg, rgbm(1, 1, 1, 0.12))
       local barY = p2.y - 8
       fill(vec2(p1.x + 24, barY), vec2(p2.x - 24, barY + 4), rgbm(1, 1, 1, 0.12), 2)
@@ -279,19 +338,29 @@ function M.hud(context, windowMode)
     if isPb then
       local phase = U.clamp(session.resultAge / 0.8, 0, 1)
       fill(p1, p2, withAlpha(BRAND.accent, (1 - phase) * 0.18), 4)
-      speedBurst(vec2(p1.x + 96, p1.y + 78), phase, BRAND.accent)
+      speedBurst(vec2(p1.x + 58, p1.y + 72), phase, BRAND.accent)
     end
-    text(result.personalBest and 'NOVO RECORDE PESSOAL' or (result.valid and 'RESULTADO DA RUN' or 'RUN INVÁLIDA'),
-      16, p1 + vec2(24, 12), accent)
-    text(string.format('%.0f', result.score or 0), 64, p1 + vec2(20, 30), BRAND.text)
-    text('PTS', 16, p1 + vec2(20, 100), BRAND.muted)
-    fill(vec2(p1.x + 22, p1.y + 96), vec2(p1.x + 90, p1.y + 100), accent, 0)
-    text(string.format('LINHA %.0f', result.line or 0), 14, p1 + vec2(200, 36), BRAND.muted)
-    text(string.format('ÂNGULO %.0f', result.angle or 0), 14, p1 + vec2(200, 58), BRAND.muted)
-    text(string.format('ESTILO %.0f', result.styleSpeed or 0), 14, p1 + vec2(200, 80), BRAND.muted)
-    text(result.valid and string.format('Média %.1f° / %.0f km/h',
+    textIn(result.personalBest and 'NOVO RECORDE PESSOAL' or (result.valid and 'RESULTADO DA RUN' or 'RUN INVÁLIDA'),
+      16, p1 + vec2(24, 8), p1 + vec2(340, 32), 'Start', 'Center', accent, 'title')
+    textIn(string.format('%.0f', result.score or 0), 64, p1 + vec2(20, 34), p1 + vec2(186, 110), 'Start', 'Center', BRAND.text, 'number')
+    fill(vec2(p1.x + 22, p1.y + 112), vec2(p1.x + 90, p1.y + 115), accent, 0)
+    textIn('PTS', 14, p1 + vec2(22, 118), p1 + vec2(120, 136), 'Start', 'Center', BRAND.muted, 'title')
+    -- Breakdown as a two-column table: name left, "points / max" right.
+    local scoring = context.scoring or {}
+    local rows = {
+      { 'LINHA', result.line, scoring.leadLinePoints or 35 },
+      { 'ÂNGULO', result.angle, scoring.leadAnglePoints or 35 },
+      { 'ESTILO', result.styleSpeed, scoring.leadStyleSpeedPoints or 30 },
+    }
+    for index, row in ipairs(rows) do
+      local top = p1.y + 40 + (index - 1) * 24
+      textIn(row[1], 13, vec2(p1.x + 200, top), vec2(p1.x + 280, top + 20), 'Start', 'Center', BRAND.muted, 'title')
+      textIn(string.format('%.0f / %d', row[2] or 0, row[3]), 14,
+        vec2(p1.x + 270, top), vec2(p2.x - 24, top + 20), 'End', 'Center', BRAND.text, 'monoBold')
+    end
+    textIn(result.valid and string.format('Média %.1f° / %.0f km/h',
       result.averageAngle or 0, result.averageSpeed or 0) or tostring(result.reason),
-      13, p1 + vec2(24, height - 28), BRAND.muted)
+      13, vec2(p1.x + 24, p2.y - 34), vec2(p2.x - 24, p2.y - 12), 'Start', 'Center', BRAND.muted, 'mono')
   end
 end
 
