@@ -40,8 +40,10 @@ public class DriftFactoryScript : IAssettoServerAutostart
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("DriftFactoryPlugin/0.3.0");
-            var script = http.GetStringAsync(ScriptUrl).GetAwaiter().GetResult();
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("DriftFactoryPlugin/0.8.0");
+            // raw.githubusercontent.com caches files for 5 minutes; a unique query
+            // skips that cache, so a restart right after a push gets the new script.
+            var script = http.GetStringAsync($"{ScriptUrl}?t={DateTimeOffset.UtcNow.ToUnixTimeSeconds()}").GetAwaiter().GetResult();
             if (script.Contains(ScriptMarker))
             {
                 Log.Information("DriftFactoryPlugin: serving the online script from GitHub ({Bytes} bytes)", script.Length);
