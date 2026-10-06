@@ -2,10 +2,12 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using AssettoServer.Commands;
 using AssettoServer.Network.Tcp;
 using AssettoServer.Server;
 using AssettoServer.Server.Configuration;
 using AssettoServer.Server.Plugin;
+using AssettoServer.Shared.Network.Packets;
 using AssettoServer.Shared.Services;
 using Microsoft.Extensions.Hosting;
 using Serilog;
@@ -45,6 +47,7 @@ public class DriftFactoryCommunity : CriticalBackgroundService, IAssettoServerAu
         ACServerConfiguration serverConfiguration,
         EntryCarManager entryCarManager,
         CSPClientMessageTypeManager clientMessages,
+        ChatService chatService,
         IHostApplicationLifetime applicationLifetime) : base(applicationLifetime)
     {
         _configuration = configuration;
@@ -60,6 +63,7 @@ public class DriftFactoryCommunity : CriticalBackgroundService, IAssettoServerAu
             : $"{serverConfiguration.Server.Track}/{serverConfiguration.Server.TrackConfig}";
 
         clientMessages.RegisterOnlineEvent<RunResultEvent>(OnRunResult);
+        chatService.MessageReceived += OnChatMessage;
 
         if (_statusHook == null && _leaderboardHook == null && _runsHook == null)
         {
@@ -73,7 +77,48 @@ public class DriftFactoryCommunity : CriticalBackgroundService, IAssettoServerAu
         // so pass it on to everyone else: their on-screen leaderboards need it.
         run.SessionId = sender.SessionId;
         _entryCarManager.BroadcastPacket(run, sender);
+        RecordRun(sender, run);
+    }
 
+    private const string ChatEncodedPrefix = "$CSP0:";
+    private const ushort LuaMessage = 60000;
+
+    /// <summary>
+    /// Some clients send online events as chat ("				$CSP0:" + base64)
+    /// instead of client messages; those never reach <see cref="OnRunResult"/>.
+    /// The chat itself is still relayed as usual, so the other players'
+    /// leaderboards get it either way.
+    /// </summary>
+    private void OnChatMessage(ACTcpClient sender, ChatEventArgs args)
+    {
+        if (TryDecodeChatRunResult(args.Message, out var run)) RecordRun(sender, run);
+    }
+
+    public static bool TryDecodeChatRunResult(string message, out RunResultEvent run)
+    {
+        run = null!;
+        message = message.TrimStart('	');
+        if (!message.StartsWith(ChatEncodedPrefix, StringComparison.Ordinal)) return false;
+        try
+        {
+            var base64 = message[ChatEncodedPrefix.Length..].Trim();
+            base64 = base64.PadRight(base64.Length + (4 - base64.Length % 4) % 4, '=');
+            var data = Convert.FromBase64String(base64);
+            if (data.Length < 6 || BitConverter.ToUInt16(data, 0) != LuaMessage) return false;
+            if (BitConverter.ToUInt32(data, 2) != RunResultEvent.PacketType) return false;
+
+            run = new PacketReader(null, data.AsMemory(6)).ReadPacket<RunResultEvent>();
+            return true;
+        }
+        catch (Exception ex) when (ex is FormatException or ArgumentException or IndexOutOfRangeException)
+        {
+            Log.Debug("DriftFactoryPlugin: unreadable chat-encoded message: {Error}", ex.Message);
+            return false;
+        }
+    }
+
+    private void RecordRun(ACTcpClient sender, RunResultEvent run)
+    {
         var driver = sender.Name ?? $"Carro {sender.SessionId}";
         var driverKey = sender.Guid != 0 ? sender.Guid.ToString(CultureInfo.InvariantCulture) : driver;
 
