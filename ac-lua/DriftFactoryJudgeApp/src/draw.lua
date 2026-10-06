@@ -89,15 +89,20 @@ end
 
 function M.layout(context)
   local editor, layout = context.editor, context.layout
-  if not editor.debug then return end
-  drawRoute(layout)
+  -- Start and finish are always drawn: every player needs them to find
+  -- where a run begins and ends, including online players who never see
+  -- the editor's debug toggle.
   if layout.leadStart then
     circle(layout.leadStart.position, layout.leadStart.radiusMeters, colors.start)
     label(layout.leadStart.position, 'PARTIDA', colors.start)
   end
   if layout.finishGate then drawFinish(layout.finishGate) end
+  -- Zones and clips: in the editor's debug mode, or when the player turns
+  -- on "Mostrar zonas e clips". The route and its nodes are editor-only.
+  if not (editor.debug or context.showCourse) then return end
+  if editor.debug then drawRoute(layout) end
   for zoneIndex, zone in ipairs(layout.outerZones) do
-    if editor:isOuterZoneVisible(zoneIndex) then
+    if not editor.debug or editor:isOuterZoneVisible(zoneIndex) then
       for index, point in ipairs(zone.points) do
         line(point, zone.points[index % #zone.points + 1], colors.outer, 0.12)
         circle(point, 0.3, colors.outer)
@@ -105,16 +110,17 @@ function M.layout(context)
       end
     end
   end
-  for index, point in ipairs(editor.outerDraft) do
-    circle(point, 0.35, colors.draft)
-    if index > 1 then line(editor.outerDraft[index - 1], point, colors.draft, 0.15) end
-  end
   for index, clip in ipairs(layout.innerClips) do
-    if editor:isInnerClipVisible(index) then
+    if not editor.debug or editor:isInnerClipVisible(index) then
       circle(clip.position, clip.radiusMeters, colors.clip)
       label(clip.position, 'CLIP ' .. index, colors.clip)
       -- (kept as "CLIP" untranslated — common drift-scene loanword)
     end
+  end
+  if not editor.debug then return end
+  for index, point in ipairs(editor.outerDraft) do
+    circle(point, 0.35, colors.draft)
+    if index > 1 then line(editor.outerDraft[index - 1], point, colors.draft, 0.15) end
   end
   if editor.mode ~= 'none' then
     local hit = editor:rayHit()
@@ -132,6 +138,13 @@ end
 -- lazily; if CSP can't build them, everything falls back to its default font.
 local FONTS_DIR = './fonts'
 local brandFonts = nil
+
+-- The online script has no app folder: it downloads the fonts and points
+-- here at the folder CSP unpacked them into.
+function M.setFontsDir(dir)
+  FONTS_DIR = dir
+  brandFonts = nil
+end
 
 local function fontFor(role)
   if brandFonts == nil then

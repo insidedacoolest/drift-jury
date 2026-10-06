@@ -25,6 +25,10 @@ Original DriftJudging SP: https://www.patreon.com/DeadEndReece/posts/driftjudges
   the editing tabs are restricted to the server admin.
 - Shared session leaderboard between players online, Portuguese
   translation, and a redesigned score HUD.
+- A server-delivered version (CSP online script) built from the same
+  modules — see `online/README.md` at the repository root. Start and finish
+  are now drawn on track for every player, not only in the editor's debug
+  mode.
 - The score HUD uses the DriftFactory brand typefaces, bundled in `fonts/`:
   Saira (Copyright 2020 The Saira Project Authors, github.com/Omnibus-Type/Saira)
   and JetBrains Mono (Copyright 2020 The JetBrains Mono Project Authors,

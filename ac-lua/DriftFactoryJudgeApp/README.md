@@ -47,6 +47,13 @@ copy that file unchanged to `layouts/<track>/<layout>.json` at the root of
 this repository and push to `master`. Players pick it up the next time they
 load into that track (GitHub's raw CDN can take a few minutes to refresh).
 
+## Server-delivered version
+
+The same judge can be delivered by the server itself as a CSP online script,
+so players don't install anything — see `online/README.md` at the repository
+root. On a server that does this, this installed copy stays idle and tells
+the player to use the server's version instead.
+
 ## NOTES:
 Sometimes right clicking a node will glitch the camera out, to get the best results make sure you are directly on top of it and then delete it.
 Sometimes Recorded road paths will "Float", I think its a map mesh issue but you can just go back at a different angle to adjust it to the position.

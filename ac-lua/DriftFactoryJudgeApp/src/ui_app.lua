@@ -96,7 +96,10 @@ local function runTab(context)
   elseif available then
     ui.newLine()
     ui.textColored('Pronto para uma run a solo', rgbm(0.2, 1, 0.35, 1))
-    wrapped('Conduz até ao círculo verde de partida e buzina. A app alinha o carro e começa uma contagem decrescente de cinco segundos.')
+    wrapped(physics.allowed()
+      and 'Conduz até ao círculo verde de partida e buzina. A app alinha o carro e começa uma contagem decrescente de cinco segundos.'
+      or 'Para dentro do círculo verde de partida, virado para o percurso, e buzina. Começa uma contagem decrescente de cinco segundos.')
+    context.showCourse = select(1, checkbox('Mostrar zonas e clips na pista', context.showCourse))
     local car = ac.getCar(0)
     if car and context.layout.leadStart then
       local inside = G.insideCircle(
@@ -456,16 +459,20 @@ function M.window(context)
   -- targets, calibration) is admin-only once online — otherwise any player
   -- could lower their own targets and inflate what they broadcast to the
   -- shared leaderboard. Offline there's no one else to restrict.
-  local canEdit = isAdmin or not (sim and sim.isOnlineRace)
+  -- The server-delivered version can't save files, so editing stays in the
+  -- installed app regardless of admin status.
+  local canEdit = not context.editingDisabled and (isAdmin or not (sim and sim.isOnlineRace))
 
   ui.textColored('Drift Factory Judge App', rgbm(0.25, 0.8, 1, 1))
   sameLine()
-  muted('v0.1.0')
+  muted('v0.2.0')
   if isAdmin then
     sameLine()
     ui.textColored('ADMIN', BRAND.accent)
   end
-  muted('Modificado, não oficial — baseado em DriftJudging SP por DeadEndReece. Ver CREDITS.md.')
+  muted('Modificado, não oficial — baseado em DriftJudging SP')
+  muted('por DeadEndReece (AGPL-3.0). Código, créditos e licença:')
+  muted('github.com/insidedacoolest/drift-jury')
   if context.status and context.status ~= '' then
     ui.textWrapped(context.status)
     ui.separator()

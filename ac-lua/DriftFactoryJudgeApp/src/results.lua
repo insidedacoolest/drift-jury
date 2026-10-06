@@ -15,7 +15,12 @@ end
 
 function M.add(results, score, track, layoutID, carID, timestamp)
   local record = U.copy(score)
-  record.dateUtc = timestamp or os.time()
+  -- Guarded: the online-script sandbox may not expose os.time.
+  if not timestamp and os and os.time then
+    local ok, now = pcall(os.time)
+    timestamp = ok and now or nil
+  end
+  record.dateUtc = timestamp or 0
   record.track = track
   record.layout = layoutID
   record.car = carID
