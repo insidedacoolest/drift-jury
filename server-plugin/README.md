@@ -16,6 +16,34 @@ GitHub and a server restart — no new plugin upload.
 Needs `EnableClientMessages: true` in `extra_cfg.yml` for the shared
 leaderboard (the plugin logs a warning if it's off).
 
+## Results and Discord (0.3)
+
+The plugin also receives every run result the online script reports
+(`RunResultEvent`, the same layout as `src/leaderboard.lua`), relays it to
+the other players (AssettoServer stops relaying a message type once a
+plugin handles it) and keeps:
+
+- `driftfactory-data/runs.jsonl` — every run, valid or not, for good;
+- `driftfactory-data/state.json` — each driver's best valid run per track
+  per week (Monday–Sunday, Europe/Lisbon), plus the Discord message ids.
+
+With webhook URLs configured it mirrors that to Discord: a live status
+message, a weekly leaderboard per track (edited in place, marked FINAL at
+the end of the week) and announcements of new weekly bests and winners.
+See `discord-setup/README.md`. Optional configuration:
+
+```yaml
+---
+!DriftFactoryConfiguration
+StatusWebhookUrl: https://discord.com/api/webhooks/...
+LeaderboardWebhookUrl: https://discord.com/api/webhooks/...
+RunsWebhookUrl: https://discord.com/api/webhooks/...
+JoinUrl: https://acstuff.ru/s/q:race/online/join?ip=...&httpPort=...
+StatusIntervalSeconds: 60
+TimeZone: Europe/Lisbon
+DataDirectory: driftfactory-data
+```
+
 ## Building
 
 Built against AssettoServer **v0.0.54** (the version Pitlane runs), .NET 8:

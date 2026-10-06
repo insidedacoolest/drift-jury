@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net8.0</TargetFramework>
@@ -7,7 +7,7 @@
         <EnableDynamicLoading>true</EnableDynamicLoading>
         <SelfContained>false</SelfContained>
         <DebugType>embedded</DebugType>
-        <Version>0.2.0</Version>
+        <Version>0.3.0</Version>
         <!-- AssettoServer source checkout at the tag the server runs (v0.0.54);
              pass -p:AssettoServerSrc=... to point elsewhere. -->
         <AssettoServerSrc Condition="'$(AssettoServerSrc)' == ''">..\..\..\AssettoServer</AssettoServerSrc>
@@ -30,3 +30,4 @@
     </ItemGroup>
 
 </Project>
+

@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using AssettoServer.Server;
 using AssettoServer.Server.Configuration;
 using AssettoServer.Server.Plugin;
@@ -40,7 +40,7 @@ public class DriftFactoryScript : IAssettoServerAutostart
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("DriftFactoryPlugin/0.2.0");
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("DriftFactoryPlugin/0.3.0");
             var script = http.GetStringAsync(ScriptUrl).GetAwaiter().GetResult();
             if (script.Contains(ScriptMarker))
             {
