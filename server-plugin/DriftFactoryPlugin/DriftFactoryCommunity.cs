@@ -291,14 +291,93 @@ public class DriftFactoryCommunity : CriticalBackgroundService, IAssettoServerAu
         }
     }
 
+    // ---- Website ---------------------------------------------------------
+
+    /// <summary>
+    /// Everything the Drift Virtual page on driftfactory.pt shows: the server
+    /// right now, this week's leaderboard and the finished weeks. Only what's
+    /// already public in Discord — no Steam ids.
+    /// </summary>
+    public object SiteSnapshot()
+    {
+        var drivers = _entryCarManager.EntryCars
+            .Where(car => car.Client is { HasSentFirstUpdate: true })
+            .Select(car => car.Client!.Name ?? "?")
+            .ToList();
+        var cars = _serverConfiguration.EntryList.Cars
+            .Select(car => car.Model).Distinct()
+            .Select(model => new { id = model, name = CarName(model) })
+            .ToList();
+        var current = _store.CurrentWeek();
+
+        return _store.Read(state =>
+        {
+            object Board(string week, string track, int limit) =>
+                (state.Weeks.TryGetValue(week, out var tracks) && tracks.TryGetValue(track, out var board)
+                    ? ResultsStore.Ranked(board) : [])
+                .Take(limit)
+                .Select((entry, index) => new
+                {
+                    pos = index + 1, driver = entry.Driver, car = entry.Car,
+                    score = Math.Round(entry.Score, 1), line = Math.Round(entry.Line, 1),
+                    angle = Math.Round(entry.Angle, 1), style = Math.Round(entry.StyleSpeed, 1),
+                    timeUtc = entry.TimeUtc,
+                })
+                .ToList();
+
+            object Week(string week, string track, int limit)
+            {
+                var (monday, sunday) = ResultsStore.WeekRange(week);
+                return new
+                {
+                    key = week, label = WeekLabel(week),
+                    start = monday.ToString("yyyy-MM-dd"), end = sunday.ToString("yyyy-MM-dd"),
+                    track = new { id = track, name = TrackName(track) },
+                    board = Board(week, track, limit),
+                };
+            }
+
+            var history = state.Weeks
+                .Where(week => string.CompareOrdinal(week.Key, current) < 0)
+                .OrderByDescending(week => week.Key, StringComparer.Ordinal)
+                .SelectMany(week => week.Value
+                    .Where(track => track.Value.Count > 0)
+                    .OrderBy(track => track.Key, StringComparer.Ordinal)
+                    .Select(track => Week(week.Key, track.Key, 10)))
+                .Take(52)
+                .ToList();
+
+            return new
+            {
+                updatedUtc = DateTime.UtcNow,
+                server = new
+                {
+                    name = _serverConfiguration.Server.Name,
+                    online = true,
+                    track = new { id = _track, name = TrackName() },
+                    players = drivers.Count,
+                    maxPlayers = _serverConfiguration.Server.MaxClients,
+                    drivers,
+                    cars,
+                    joinUrl = _configuration.JoinUrl,
+                },
+                week = Week(current, _track, 50),
+                history,
+            };
+        });
+    }
+
     // ---- Names and formatting --------------------------------------------
 
-    private string TrackName()
+    private string TrackName() => TrackName(_track);
+
+    /// <summary>Display name of a "track" or "track/layout" id, from its ui_track.json when the server has it.</summary>
+    private string TrackName(string track)
     {
-        var config = _serverConfiguration.Server.TrackConfig;
-        var folder = Path.Combine("content", "tracks", _serverConfiguration.Server.Track, "ui");
-        var file = string.IsNullOrEmpty(config) ? Path.Combine(folder, "ui_track.json") : Path.Combine(folder, config, "ui_track.json");
-        return DisplayName(file, _track);
+        var parts = track.Split('/', 2);
+        var folder = Path.Combine("content", "tracks", parts[0], "ui");
+        var file = parts.Length == 1 ? Path.Combine(folder, "ui_track.json") : Path.Combine(folder, parts[1], "ui_track.json");
+        return DisplayName(file, track);
     }
 
     private string CarName(string model) =>

@@ -44,6 +44,15 @@ TimeZone: Europe/Lisbon
 DataDirectory: driftfactory-data
 ```
 
+## Website data (0.4)
+
+`GET /driftfactory/site.json` on the server's HTTP port returns the server
+right now (track, players, cars, join link), this week's leaderboard (top
+50, with the line/angle/style breakdown) and the finished weeks (top 10
+each, most recent first, up to a year). Read-only and public — the same
+information Discord shows, without Steam ids. The Drift Virtual page on
+driftfactory.pt (`web/app/lib/virtualServer.js`) reads it every minute.
+
 ## Building
 
 Built against AssettoServer **v0.0.54** (the version Pitlane runs), .NET 8:

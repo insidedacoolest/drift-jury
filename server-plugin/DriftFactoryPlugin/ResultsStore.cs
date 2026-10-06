@@ -160,6 +160,12 @@ public class ResultsStore
         }
     }
 
+    /// <summary>Runs <paramref name="read"/> while no result can be recorded, for a consistent view.</summary>
+    public T Read<T>(Func<StoreState, T> read)
+    {
+        lock (_lock) return read(State);
+    }
+
     public static List<BestEntry> Ranked(Dictionary<string, BestEntry> board) =>
         board.Values.OrderByDescending(entry => entry.Score).ThenBy(entry => entry.TimeUtc).ToList();
 
