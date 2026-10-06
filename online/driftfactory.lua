@@ -2473,7 +2473,7 @@ local BRAND = {
   muted = rgbm(154 / 255, 160 / 255, 172 / 255, 1),
 }
 
-local hudWindowWidth = 380
+local hudWindowWidth = 300
 local hudWindowTopPadding = 26
 local hudWindowBottomPadding = 6
 
@@ -2705,11 +2705,11 @@ end
 -- the flourish that fires once on a new personal best. The inner radius
 -- keeps the lines clear of the number itself.
 local function speedBurst(center, phase, color)
-  local count = 7
-  local innerRadius, outerRadius = 46 + phase * 10, 58 + phase * 30
+  local count = 5
+  local innerRadius, outerRadius = 40 + phase * 6, 50 + phase * 14
   local alpha = 1 - phase
   for i = 1, count do
-    local angle = -0.7 + (i - 1) / (count - 1) * 1.4
+    local angle = -0.5 + (i - 1) / (count - 1) * 1.0
     local dir = vec2(math.cos(angle), math.sin(angle))
     local a = center + dir * innerRadius
     local b = center + dir * outerRadius
@@ -2717,112 +2717,215 @@ local function speedBurst(center, phase, color)
   end
 end
 
+-- Panel heights per state. The HUD only carries what a driver reads at a
+-- glance: the count, angle and speed while driving, and the score (or why
+-- the run was voided) at the end.
+local hudHeights = { countdown = 76, running = 72, result = 100, idle = 92 }
+
+function M.hudSize(context)
+  local state = context.session.state
+  return hudWindowWidth, hudHeights[state] or hudHeights.countdown
+end
+
 function M.hudWindowSize(context)
-  local panelHeight = context and select(2, M.hudSize(context)) or 178
+  local panelHeight = context and select(2, M.hudSize(context)) or hudHeights.result
   if context and not context.session:isBusy() and context.session.resultAge >= 4 then
-    panelHeight = 70
+    panelHeight = hudHeights.idle
   end
   return hudWindowWidth, panelHeight + hudWindowTopPadding + hudWindowBottomPadding
 end
 
-function M.hudSize(context)
-  if context.session.state == 'result' then return hudWindowWidth, 178 end
-  if context.session.state == 'running' then return hudWindowWidth, 108 end
-  return hudWindowWidth, 96
+local function panel(p1, p2, accent)
+  fill(p1, p2, BRAND.panelBg, 4)
+  accentStripe(p1, vec2(p1.x, p2.y), accent)
+  cornerWedge(vec2(p2.x, p1.y), 14, accent)
+end
+
+-- Between runs: what to do next (drive to the start, or honk once inside
+-- it) and the rules that void a run, so a first-time player needs no menu.
+local function guide(context, p1)
+  local p2 = p1 + vec2(hudWindowWidth, hudHeights.idle)
+  local layout = context.layout
+  local start = layout.leadStart
+  local ready = start ~= nil and layout.finishGate ~= nil and #(layout.pathWaypoints or {}) >= 2
+  local car = ac.getCar(0)
+  local distance = nil
+  if ready and car then
+    local dx, dz = car.position.x - start.position.x, car.position.z - start.position.z
+    distance = math.sqrt(dx * dx + dz * dz) - (start.radiusMeters or 0)
+  end
+  local inside = distance ~= nil and distance <= 0
+
+  panel(p1, p2, ready and BRAND.accent or BRAND.accent2)
+  if not ready then
+    -- No run is possible here, so the rules would only be noise.
+    textIn('SEM LAYOUT NESTA PISTA', 15, p1 + vec2(20, 18), vec2(p2.x - 20, p1.y + 44), 'Start', 'Center', BRAND.accent2, 'title')
+    textIn('O admin ainda não publicou o layout.', 11, p1 + vec2(20, 46), vec2(p2.x - 16, p1.y + 66),
+      'Start', 'Center', BRAND.muted, 'mono')
+    return
+  elseif inside then
+    local center = vec2(p2.x - 34, p1.y + 22)
+    local phase = (os.clock and os.clock() or 0) % 1
+    pulseRing(center, 7, 8, phase, BRAND.accent)
+    ui.drawCircleFilled(center, 5, BRAND.accent)
+    textIn('BUZINA PARA COMEÇAR', 15, p1 + vec2(20, 8), vec2(p2.x - 52, p1.y + 34), 'Start', 'Center', BRAND.accent, 'title')
+  else
+    textIn('VAI ATÉ À PARTIDA', 15, p1 + vec2(20, 8), vec2(p2.x - 90, p1.y + 34), 'Start', 'Center', BRAND.text, 'title')
+    textIn(distance and string.format('%.0f m', math.max(0, distance)) or '', 15,
+      vec2(p2.x - 90, p1.y + 8), vec2(p2.x - 18, p1.y + 34), 'End', 'Center', BRAND.accent, 'monoBold')
+  end
+
+  -- Rules that void a run.
+  fill(vec2(p1.x + 20, p1.y + 40), vec2(p2.x - 16, p1.y + 41), rgbm(1, 1, 1, 0.08), 0)
+  textIn('A RUN É INVÁLIDA SE', 9, p1 + vec2(20, 44), vec2(p2.x - 16, p1.y + 56), 'Start', 'Center', BRAND.muted, 'mono')
+  textIn('Arrancar antes · Contramão · Endireitar', 10,
+    p1 + vec2(20, 57), vec2(p2.x - 12, p1.y + 71), 'Start', 'Center', BRAND.text, 'mono')
+  textIn('Sair da pista · Parar · Trompo', 10,
+    p1 + vec2(20, 71), vec2(p2.x - 12, p1.y + 85), 'Start', 'Center', BRAND.text, 'mono')
 end
 
 function M.hud(context, windowMode)
   local session = context.session
+  local sim = ac.getSim()
   if not session:isBusy() and session.resultAge >= 4 then
-    if not windowMode then return end
-    local width, height = hudWindowWidth, 70
-    local p1 = vec2(0, hudWindowTopPadding)
-    local p2 = p1 + vec2(width, height)
-    fill(p1, p2, BRAND.panelBg, 4)
-    accentStripe(p1, vec2(p1.x, p2.y), BRAND.accent)
-    cornerWedge(vec2(p2.x, p1.y), 18, BRAND.accent2)
-    textIn('HUD', 18, p1 + vec2(24, 8), p1 + vec2(340, 32), 'Start', 'Center', BRAND.accent, 'title')
-    textIn('Aparece na contagem, na run e no resultado.', 13,
-      p1 + vec2(24, 36), p1 + vec2(width - 24, 58), 'Start', 'Center', BRAND.muted, 'mono')
+    guide(context, windowMode and vec2(0, hudWindowTopPadding)
+      or vec2(sim.windowWidth * 0.5 - hudWindowWidth * 0.5, sim.windowHeight - hudHeights.idle - 40))
     return
   end
-  local sim = ac.getSim()
+
   local width, height = M.hudSize(context)
   local p1 = windowMode
     and vec2(0, hudWindowTopPadding)
-    or vec2(sim.windowWidth * 0.5 - width * 0.5, sim.windowHeight - height - 36)
+    or vec2(sim.windowWidth * 0.5 - width * 0.5, sim.windowHeight - height - 40)
   local p2 = p1 + vec2(width, height)
   local result = context.lastResult
-  local accent = result and not result.valid and BRAND.accent2 or BRAND.accent
-  fill(p1, p2, BRAND.panelBg, 4)
-  accentStripe(p1, vec2(p1.x, p2.y), accent)
-  cornerWedge(vec2(p2.x, p1.y), 18, accent)
+  local accent = session.state == 'result' and result and not result.valid and BRAND.accent2 or BRAND.accent
+  panel(p1, p2, accent)
 
   if session.state == 'countdown' then
-    -- Ring and digit share one center on the right; the left column holds
-    -- the text, so neither can run into the other.
-    local center = vec2(p2.x - 72, p1.y + height * 0.5)
+    -- Text left, count right inside its pulsing ring.
+    local center = vec2(p2.x - 46, p1.y + height * 0.5)
     -- countdownRemaining decreases, so its fractional part runs 1 -> 0 each
     -- second; inverted so the ring starts small and expands/fades instead.
     local phase = 1 - (session.countdownRemaining - math.floor(session.countdownRemaining))
-    pulseRing(center, 22, 16, phase, accent)
-    pulseRing(center, 22, 16, (phase + 0.5) % 1, accent)
-    ui.drawCircle(center, 22, withAlpha(BRAND.text, 0.25), 40, 1.5)
-    textIn('PREPARA-TE', 18, p1 + vec2(24, 8), p1 + vec2(230, 32), 'Start', 'Center', accent, 'title')
-    textIn('A run começa no zero.', 13, p1 + vec2(24, 34), p1 + vec2(230, 54), 'Start', 'Center', BRAND.muted, 'mono')
+    pulseRing(center, 20, 12, phase, accent)
+    pulseRing(center, 20, 12, (phase + 0.5) % 1, accent)
+    ui.drawCircle(center, 20, withAlpha(BRAND.text, 0.25), 40, 1.5)
+    textIn('PREPARA-TE', 20, p1 + vec2(20, 12), p1 + vec2(200, 40), 'Start', 'Center', accent, 'title')
+    textIn('ARRANCAR ANTES INVALIDA', 11, p1 + vec2(20, 42), p1 + vec2(200, 60), 'Start', 'Center', BRAND.muted, 'mono')
     -- Box nudged up a little: DWrite centers the line box, and digits sit
     -- low inside it.
-    textIn(tostring(math.max(1, math.ceil(session.countdownRemaining))), 36,
-      center - vec2(30, 33), center + vec2(30, 27), 'Center', 'Center', BRAND.text, 'number')
-    textIn('ARRANCAR ANTES INVALIDA', 13,
-      p1 + vec2(24, height - 32), p1 + vec2(230, height - 10), 'Start', 'Center', BRAND.accent2, 'monoBold')
+    textIn(tostring(math.max(1, math.ceil(session.countdownRemaining))), 30,
+      center - vec2(26, 29), center + vec2(26, 23), 'Center', 'Center', BRAND.text, 'number')
+
   elseif session.state == 'running' then
     local sample = session.samples[#session.samples]
-    local gaugeCenter, gaugeRadius = vec2(p2.x - 64, p1.y + 56), 34
-    textIn('RUN A SOLO', 18, p1 + vec2(24, 8), p1 + vec2(150, 32), 'Start', 'Center', accent, 'title')
-    -- Elapsed time ends left of the gauge so it can't overlap its arc.
-    textIn(string.format('%.1fs', session.runElapsed), 16,
-      p1 + vec2(150, 8), vec2(gaugeCenter.x - gaugeRadius - 14, p1.y + 32), 'End', 'Center', BRAND.muted, 'mono')
     if sample then
-      textIn(string.format('%.0f°', sample.angleDeg), 34, p1 + vec2(24, 38), p1 + vec2(130, 78), 'Start', 'Center', BRAND.text, 'number')
-      textIn('ÂNGULO', 12, p1 + vec2(24, 78), p1 + vec2(130, 94), 'Start', 'Center', BRAND.muted, 'title')
-      textIn(string.format('%.0f', sample.speedKmh), 34, p1 + vec2(140, 38), p1 + vec2(250, 78), 'Start', 'Center', BRAND.text, 'number')
-      textIn('KM/H', 12, p1 + vec2(140, 78), p1 + vec2(250, 94), 'Start', 'Center', BRAND.muted, 'title')
-      angleGauge(gaugeCenter, gaugeRadius, sample.angleDeg, 90,
+      -- Angle is the headline number; speed sits beside it; the gauge on the
+      -- right turns from lime to magenta as the angle passes the target.
+      textIn(string.format('%.0f°', sample.angleDeg), 38, p1 + vec2(20, 4), p1 + vec2(118, 52), 'Start', 'Center', BRAND.text, 'number')
+      textIn('ÂNGULO', 10, p1 + vec2(21, 48), p1 + vec2(118, 62), 'Start', 'Center', BRAND.muted, 'mono')
+      textIn(string.format('%.0f', sample.speedKmh), 26, p1 + vec2(128, 12), p1 + vec2(210, 48), 'Start', 'Center', BRAND.text, 'number')
+      textIn('KM/H', 10, p1 + vec2(129, 48), p1 + vec2(210, 62), 'Start', 'Center', BRAND.muted, 'mono')
+      angleGauge(vec2(p2.x - 44, p1.y + 34), 24, sample.angleDeg, 90,
         context.scoring.targetAngleDeg, rgbm(1, 1, 1, 0.12))
-      local barY = p2.y - 8
-      fill(vec2(p1.x + 24, barY), vec2(p2.x - 24, barY + 4), rgbm(1, 1, 1, 0.12), 2)
-      fill(vec2(p1.x + 24, barY),
-        vec2(p1.x + 24 + (width - 48) * U.clamp(sample.progress.normalized, 0, 1), barY + 4), accent, 2)
+      -- Course progress along the bottom edge.
+      local barY = p2.y - 5
+      fill(vec2(p1.x + 16, barY), vec2(p2.x - 10, barY + 3), rgbm(1, 1, 1, 0.10), 2)
+      fill(vec2(p1.x + 16, barY),
+        vec2(p1.x + 16 + (width - 26) * U.clamp(sample.progress.normalized, 0, 1), barY + 3), accent, 2)
     end
+
   elseif result then
-    local isPb = result.personalBest and session.resultAge < 0.8
-    if isPb then
+    if result.personalBest and session.resultAge < 0.8 then
       local phase = U.clamp(session.resultAge / 0.8, 0, 1)
       fill(p1, p2, withAlpha(BRAND.accent, (1 - phase) * 0.18), 4)
-      speedBurst(vec2(p1.x + 58, p1.y + 72), phase, BRAND.accent)
+      speedBurst(vec2(p1.x + 52, p1.y + 60), phase, BRAND.accent)
     end
-    textIn(result.personalBest and 'NOVO RECORDE PESSOAL' or (result.valid and 'RESULTADO DA RUN' or 'RUN INVÁLIDA'),
-      16, p1 + vec2(24, 8), p1 + vec2(340, 32), 'Start', 'Center', accent, 'title')
-    textIn(string.format('%.0f', result.score or 0), 64, p1 + vec2(20, 34), p1 + vec2(186, 110), 'Start', 'Center', BRAND.text, 'number')
-    fill(vec2(p1.x + 22, p1.y + 112), vec2(p1.x + 90, p1.y + 115), accent, 0)
-    textIn('PTS', 14, p1 + vec2(22, 118), p1 + vec2(120, 136), 'Start', 'Center', BRAND.muted, 'title')
-    -- Breakdown as a two-column table: name left, "points / max" right.
-    local scoring = context.scoring or {}
-    local rows = {
-      { 'LINHA', result.line, scoring.leadLinePoints or 35 },
-      { 'ÂNGULO', result.angle, scoring.leadAnglePoints or 35 },
-      { 'ESTILO', result.styleSpeed, scoring.leadStyleSpeedPoints or 30 },
-    }
-    for index, row in ipairs(rows) do
-      local top = p1.y + 40 + (index - 1) * 24
-      textIn(row[1], 13, vec2(p1.x + 200, top), vec2(p1.x + 280, top + 20), 'Start', 'Center', BRAND.muted, 'title')
-      textIn(string.format('%.0f / %d', row[2] or 0, row[3]), 14,
-        vec2(p1.x + 270, top), vec2(p2.x - 24, top + 20), 'End', 'Center', BRAND.text, 'monoBold')
+    textIn(result.personalBest and 'NOVO RECORDE' or (result.valid and 'RESULTADO' or 'RUN INVÁLIDA'),
+      13, p1 + vec2(20, 6), p1 + vec2(220, 26), 'Start', 'Center', accent, 'title')
+    textIn(string.format('%.0f', result.score or 0), 52, p1 + vec2(18, 26), p1 + vec2(130, 86), 'Start', 'Center', BRAND.text, 'number')
+    textIn('PTS', 10, p1 + vec2(20, 82), p1 + vec2(80, 96), 'Start', 'Center', BRAND.muted, 'mono')
+    if result.valid then
+      -- Breakdown: name left, points / max right.
+      local scoring = context.scoring or {}
+      local rows = {
+        { 'LINHA', result.line, scoring.leadLinePoints or 35 },
+        { 'ÂNGULO', result.angle, scoring.leadAnglePoints or 35 },
+        { 'ESTILO', result.styleSpeed, scoring.leadStyleSpeedPoints or 30 },
+      }
+      for index, row in ipairs(rows) do
+        local top = p1.y + 30 + (index - 1) * 20
+        textIn(row[1], 11, vec2(p1.x + 150, top), vec2(p1.x + 214, top + 18), 'Start', 'Center', BRAND.muted, 'title')
+        textIn(string.format('%.0f/%d', row[2] or 0, row[3]), 12,
+          vec2(p1.x + 210, top), vec2(p2.x - 16, top + 18), 'End', 'Center', BRAND.text, 'monoBold')
+      end
+    else
+      -- Voided: the reason is what the driver needs.
+      textIn(tostring(result.reason or ''), 15, p1 + vec2(140, 30), vec2(p2.x - 16, p1.y + 84),
+        'Start', 'Center', BRAND.text, 'title')
     end
-    textIn(result.valid and string.format('Média %.1f° / %.0f km/h',
-      result.averageAngle or 0, result.averageSpeed or 0) or tostring(result.reason),
-      13, vec2(p1.x + 24, p2.y - 34), vec2(p2.x - 24, p2.y - 12), 'Start', 'Center', BRAND.muted, 'mono')
+  end
+end
+
+-- Compact on-screen leaderboard: best run per driver this session on this
+-- track. Shows the top rows; if the local driver is further down, the last
+-- row is theirs, so they always see where they stand.
+local leaderboardWidth, leaderboardMaxRows = 264, 8
+local leaderboardHeader, leaderboardRow = 32, 20
+
+M.windowTopPadding = hudWindowTopPadding
+
+local function visibleLeaderboardRows(entries, ownName)
+  local rows, ownIndex = {}, nil
+  for index, entry in ipairs(entries) do
+    if entry.name == ownName then ownIndex = index end
+  end
+  for index = 1, math.min(#entries, leaderboardMaxRows) do
+    rows[#rows + 1] = { position = index, entry = entries[index] }
+  end
+  if ownIndex and ownIndex > leaderboardMaxRows then
+    rows[#rows] = { position = ownIndex, entry = entries[ownIndex] }
+  end
+  return rows
+end
+
+function M.leaderboardSize(entries)
+  local count = math.max(1, math.min(#entries, leaderboardMaxRows))
+  return leaderboardWidth, leaderboardHeader + count * leaderboardRow + 10
+end
+
+---@param entries {name: string, score: number, valid: boolean}[] @Best first, from Leaderboard.entries().
+---@param origin vec2 @Top-left corner of the panel.
+function M.leaderboard(context, entries, origin)
+  local width, height = M.leaderboardSize(entries)
+  local p1, p2 = origin, origin + vec2(width, height)
+  fill(p1, p2, BRAND.panelBg, 4)
+  accentStripe(p1, vec2(p1.x, p2.y), BRAND.accent)
+  textIn('CLASSIFICAÇÃO', 13, p1 + vec2(20, 6), p1 + vec2(140, 28), 'Start', 'Center', BRAND.accent, 'title')
+  textIn(context.trackName or context.track or '', 11, p1 + vec2(140, 6), vec2(p2.x - 12, p1.y + 28),
+    'End', 'Center', BRAND.muted, 'mono')
+
+  if #entries == 0 then
+    textIn('Ainda sem runs nesta sessão.', 12, p1 + vec2(20, leaderboardHeader),
+      vec2(p2.x - 12, p1.y + leaderboardHeader + leaderboardRow), 'Start', 'Center', BRAND.muted, 'mono')
+    return
+  end
+
+  local ownName = U.call(ac.getDriverName, nil, 0)
+  for index, row in ipairs(visibleLeaderboardRows(entries, ownName)) do
+    local top = p1.y + leaderboardHeader + (index - 1) * leaderboardRow
+    local entry = row.entry
+    if entry.name == ownName then
+      fill(vec2(p1.x + 12, top), vec2(p2.x - 6, top + leaderboardRow), withAlpha(BRAND.accent, 0.12), 2)
+    end
+    textIn(tostring(row.position), 12, vec2(p1.x + 14, top), vec2(p1.x + 36, top + leaderboardRow),
+      'End', 'Center', row.position == 1 and BRAND.accent or BRAND.muted, 'monoBold')
+    textIn(entry.name, 13, vec2(p1.x + 46, top), vec2(p2.x - 74, top + leaderboardRow),
+      'Start', 'Center', entry.valid and BRAND.text or BRAND.muted, 'title')
+    textIn(entry.valid and string.format('%.1f', entry.score or 0) or '—', 13,
+      vec2(p2.x - 72, top), vec2(p2.x - 14, top + leaderboardRow),
+      'End', 'Center', entry.valid and BRAND.text or BRAND.accent2, 'monoBold')
   end
 end
 
@@ -2835,7 +2938,6 @@ local U = require('src.util')
 local G = require('src.geometry')
 local Model = require('src.model')
 local Profiles = require('src.profiles')
-local Leaderboard = require('src.leaderboard')
 local M = {}
 
 -- Palette pulled from driftfactory.pt (background/text/lime accent/magenta
@@ -2952,6 +3054,13 @@ local function runTab(context)
   scoreLine('Ângulo mínimo', context.scoring.minimumAngleDeg)
   scoreLine('Ângulo de estilo (início)', context.scoring.styleMinimumDriftAngleDeg)
   scoreLine('Ângulo de estilo (total)', context.scoring.styleFullDriftAngleDeg)
+
+  ui.newLine()
+  heading('Classificação')
+  local showLeaderboard, leaderboardChanged = checkbox('Mostrar a classificação no ecrã', context.showLeaderboard)
+  if leaderboardChanged then context:setShowLeaderboard(showLeaderboard) end
+  muted('Melhor run de cada piloto nesta sessão, no canto do ecrã.')
+  muted('Partilhada entre jogadores, não validada pelo servidor.')
 
   ui.newLine()
   heading('A Run Fica Inválida Se')
@@ -3274,26 +3383,6 @@ local function resultsTab(context)
   end
 end
 
-local function leaderboardTab(context)
-  ui.textColored('CLASSIFICAÇÃO', BRAND.accent)
-  ui.separator()
-  wrapped('Transmitido diretamente entre clientes online — não validado pelo servidor, trata isto como casual, não competitivo.')
-  ui.newLine()
-  local list = Leaderboard.entries()
-  if #list == 0 then
-    muted('Ainda sem runs reportadas.')
-    return
-  end
-  for index, entry in ipairs(list) do
-    local color = not entry.valid and BRAND.muted or (index == 1 and BRAND.accent or BRAND.text)
-    ui.textColored(string.format('%d. %-20s %6.1f pts', index, entry.name, entry.score), color)
-    if not entry.valid then
-      sameLine()
-      ui.textColored('(inválida)', BRAND.accent2)
-    end
-  end
-end
-
 function M.window(context)
   local sim = ac.getSim()
   local isAdmin = sim and sim.isAdmin == true
@@ -3331,7 +3420,6 @@ function M.window(context)
       ui.tabItem('Calibração', function() calibrationTab(context) end)
     end
     ui.tabItem('Resultados', function() resultsTab(context) end)
-    ui.tabItem('Classificação', function() leaderboardTab(context) end)
   end)
 end
 
@@ -3390,6 +3478,7 @@ function Context.new(options)
   local hudSettings = storage:loadHudSettings()
   local self = setmetatable({
     track = track,
+    trackName = U.call(ac.getTrackName, track),
     layoutID = layoutID,
     carID = carID,
     storage = storage,
@@ -3399,6 +3488,8 @@ function Context.new(options)
     -- Player-side toggle to draw outer zones and clips on track (start and
     -- finish are always drawn).
     showCourse = false,
+    -- On-screen leaderboard (top-right corner); on unless the player turned it off.
+    showLeaderboard = hudSettings.showLeaderboard ~= false,
     layout = layout,
     layoutSource = layoutSource, -- 'local' | 'official' | 'official-cached' | 'official-missing'
     layoutStatus = nil, -- message about the official download, shown in the run tab
@@ -3417,6 +3508,13 @@ function Context.new(options)
   self.editor = Editor.new(self)
   if isOnline() then self:fetchOfficialLayout() end
   return self
+end
+
+function Context:setShowLeaderboard(show)
+  if self.showLeaderboard == show then return end
+  self.showLeaderboard = show
+  self.hudSettings.showLeaderboard = show
+  self.storage:saveHudSettings(self.hudSettings)
 end
 
 function Context:refreshScoring()
@@ -3611,6 +3709,7 @@ local Context = require('src.context')
 local OnlineStorage = require('src.storage_online')
 local Draw = require('src.draw')
 local UI = require('src.ui_app')
+local Leaderboard = require('src.leaderboard')
 
 local FONTS_URL = 'https://raw.githubusercontent.com/insidedacoolest/drift-jury/master/online/fonts.zip'
 
@@ -3643,8 +3742,14 @@ function script.draw3D()
   Draw.layout(context)
 end
 
--- Score HUD, drawn straight onto the screen (bottom center) during the
--- countdown, the run and for a few seconds after.
+-- Drawn straight onto the screen: the session leaderboard in the top-right
+-- corner (unless turned off in the run tab), and the score HUD at the bottom
+-- center during the countdown, the run and for a few seconds after.
 function script.drawUI()
+  if context.showLeaderboard then
+    local entries = Leaderboard.entries()
+    local width = Draw.leaderboardSize(entries)
+    Draw.leaderboard(context, entries, vec2(ac.getSim().windowWidth - width - 24, 24))
+  end
   Draw.hud(context, false)
 end

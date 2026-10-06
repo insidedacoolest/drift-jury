@@ -48,6 +48,7 @@ function Context.new(options)
   local hudSettings = storage:loadHudSettings()
   local self = setmetatable({
     track = track,
+    trackName = U.call(ac.getTrackName, track),
     layoutID = layoutID,
     carID = carID,
     storage = storage,
@@ -57,6 +58,8 @@ function Context.new(options)
     -- Player-side toggle to draw outer zones and clips on track (start and
     -- finish are always drawn).
     showCourse = false,
+    -- On-screen leaderboard (top-right corner); on unless the player turned it off.
+    showLeaderboard = hudSettings.showLeaderboard ~= false,
     layout = layout,
     layoutSource = layoutSource, -- 'local' | 'official' | 'official-cached' | 'official-missing'
     layoutStatus = nil, -- message about the official download, shown in the run tab
@@ -75,6 +78,13 @@ function Context.new(options)
   self.editor = Editor.new(self)
   if isOnline() then self:fetchOfficialLayout() end
   return self
+end
+
+function Context:setShowLeaderboard(show)
+  if self.showLeaderboard == show then return end
+  self.showLeaderboard = show
+  self.hudSettings.showLeaderboard = show
+  self.storage:saveHudSettings(self.hudSettings)
 end
 
 function Context:refreshScoring()

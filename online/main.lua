@@ -15,6 +15,7 @@ local Context = require('src.context')
 local OnlineStorage = require('src.storage_online')
 local Draw = require('src.draw')
 local UI = require('src.ui_app')
+local Leaderboard = require('src.leaderboard')
 
 local FONTS_URL = 'https://raw.githubusercontent.com/insidedacoolest/drift-jury/master/online/fonts.zip'
 
@@ -47,8 +48,14 @@ function script.draw3D()
   Draw.layout(context)
 end
 
--- Score HUD, drawn straight onto the screen (bottom center) during the
--- countdown, the run and for a few seconds after.
+-- Drawn straight onto the screen: the session leaderboard in the top-right
+-- corner (unless turned off in the run tab), and the score HUD at the bottom
+-- center during the countdown, the run and for a few seconds after.
 function script.drawUI()
+  if context.showLeaderboard then
+    local entries = Leaderboard.entries()
+    local width = Draw.leaderboardSize(entries)
+    Draw.leaderboard(context, entries, vec2(ac.getSim().windowWidth - width - 24, 24))
+  end
   Draw.hud(context, false)
 end

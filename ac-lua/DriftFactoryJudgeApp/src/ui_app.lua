@@ -2,7 +2,6 @@ local U = require('src.util')
 local G = require('src.geometry')
 local Model = require('src.model')
 local Profiles = require('src.profiles')
-local Leaderboard = require('src.leaderboard')
 local M = {}
 
 -- Palette pulled from driftfactory.pt (background/text/lime accent/magenta
@@ -119,6 +118,13 @@ local function runTab(context)
   scoreLine('Ângulo mínimo', context.scoring.minimumAngleDeg)
   scoreLine('Ângulo de estilo (início)', context.scoring.styleMinimumDriftAngleDeg)
   scoreLine('Ângulo de estilo (total)', context.scoring.styleFullDriftAngleDeg)
+
+  ui.newLine()
+  heading('Classificação')
+  local showLeaderboard, leaderboardChanged = checkbox('Mostrar a classificação no ecrã', context.showLeaderboard)
+  if leaderboardChanged then context:setShowLeaderboard(showLeaderboard) end
+  muted('Melhor run de cada piloto nesta sessão, no canto do ecrã.')
+  muted('Partilhada entre jogadores, não validada pelo servidor.')
 
   ui.newLine()
   heading('A Run Fica Inválida Se')
@@ -441,26 +447,6 @@ local function resultsTab(context)
   end
 end
 
-local function leaderboardTab(context)
-  ui.textColored('CLASSIFICAÇÃO', BRAND.accent)
-  ui.separator()
-  wrapped('Transmitido diretamente entre clientes online — não validado pelo servidor, trata isto como casual, não competitivo.')
-  ui.newLine()
-  local list = Leaderboard.entries()
-  if #list == 0 then
-    muted('Ainda sem runs reportadas.')
-    return
-  end
-  for index, entry in ipairs(list) do
-    local color = not entry.valid and BRAND.muted or (index == 1 and BRAND.accent or BRAND.text)
-    ui.textColored(string.format('%d. %-20s %6.1f pts', index, entry.name, entry.score), color)
-    if not entry.valid then
-      sameLine()
-      ui.textColored('(inválida)', BRAND.accent2)
-    end
-  end
-end
-
 function M.window(context)
   local sim = ac.getSim()
   local isAdmin = sim and sim.isAdmin == true
@@ -498,7 +484,6 @@ function M.window(context)
       ui.tabItem('Calibração', function() calibrationTab(context) end)
     end
     ui.tabItem('Resultados', function() resultsTab(context) end)
-    ui.tabItem('Classificação', function() leaderboardTab(context) end)
   end)
 end
 

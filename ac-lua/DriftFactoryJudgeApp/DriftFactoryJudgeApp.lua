@@ -9,6 +9,7 @@ local Storage = require('src.storage')
 local Context = require('src.context')
 local Draw = require('src.draw')
 local UI = require('src.ui_app')
+local Leaderboard = require('src.leaderboard')
 
 -- A server that delivers the Drift Factory online script already gives
 -- every player the judge; running this installed copy as well would draw a
@@ -282,4 +283,9 @@ end
 function windowHud()
   if serverJudge then return end
   Draw.hud(context, true)
+end
+
+function windowLeaderboard()
+  if serverJudge then return end
+  Draw.leaderboard(context, Leaderboard.entries(), vec2(0, Draw.windowTopPadding))
 end
