@@ -7,7 +7,14 @@
 // staffOnly on a category: hidden from everyone but the staff roles.
 // webhook: a webhook the server plugin posts to (its URL goes into the plugin config).
 
-export const SERVER_JOIN_URL = 'https://acstuff.ru/s/q:race/online/join?ip=45.131.108.170&httpPort=9055';
+// Names as shown in Discord: "👋・boas-vindas" for channels, "📌 INFORMAÇÃO"
+// for categories. `name` stays the key used everywhere else (links in
+// messages, webhooks, the setup state).
+export const SPACER = '・';
+export const displayName = (spec, isCategory = false) =>
+  !spec.emoji ? spec.name : isCategory ? `${spec.emoji} ${spec.name}` : `${spec.emoji}${SPACER}${spec.name}`;
+
+export const SERVER_JOIN_URL ='https://acstuff.ru/s/q:race/online/join?ip=45.131.108.170&httpPort=9055';
 
 // Brand colors (driftfactory.pt).
 export const LIME = 0xd4ff3f;
@@ -27,123 +34,123 @@ export const ROLES = [
 
 export const CATEGORIES = [
   {
-    name: 'INFORMAÇÃO',
+    name: 'INFORMAÇÃO', emoji: '📌',
     channels: [
-      { name: 'boas-vindas', readOnly: true, topic: 'Bem-vindo à DriftFactory. Começa por aqui.' },
-      { name: 'regras', readOnly: true, topic: 'Regras da comunidade e do servidor.' },
-      { name: 'como-entrar', readOnly: true, topic: 'Tudo o que precisas para entrar no servidor.' },
-      { name: 'anúncios', kind: 'announcement', readOnly: true, topic: 'Novidades, eventos e mudanças. Podes seguir este canal no teu servidor.' },
-      { name: 'faq', readOnly: true, topic: 'Perguntas frequentes.' },
-      { name: 'cargos', readOnly: true, topic: 'O que significa cada cargo e como se consegue.' },
+      { name: 'boas-vindas', emoji: '👋', readOnly: true, topic: 'Bem-vindo à DriftFactory. Começa por aqui.' },
+      { name: 'regras', emoji: '📜', readOnly: true, topic: 'Regras da comunidade e do servidor.' },
+      { name: 'como-entrar', emoji: '🔑', readOnly: true, topic: 'Tudo o que precisas para entrar no servidor.' },
+      { name: 'anúncios', emoji: '📢', kind: 'announcement', readOnly: true, topic: 'Novidades, eventos e mudanças. Podes seguir este canal no teu servidor.' },
+      { name: 'faq', emoji: '❓', readOnly: true, topic: 'Perguntas frequentes.' },
+      { name: 'cargos', emoji: '🏷️', readOnly: true, topic: 'O que significa cada cargo e como se consegue.' },
     ],
   },
   {
-    name: 'SERVIDORES',
+    name: 'SERVIDORES', emoji: '🖥️',
     channels: [
-      { name: 'estado-servidores', readOnly: true, webhook: 'StatusWebhookUrl',
+      { name: 'estado-servidores', emoji: '🟢', readOnly: true, webhook: 'StatusWebhookUrl',
         topic: 'Pista, pilotos ligados e link para entrar — atualizado a cada minuto.' },
-      { name: 'atualizações-da-app', readOnly: true, topic: 'Mudanças na app de julgamento e no servidor.' },
+      { name: 'atualizações-da-app', emoji: '🛠️', readOnly: true, topic: 'Mudanças na app de julgamento e no servidor.' },
     ],
   },
   {
-    name: 'COMPETIÇÃO',
+    name: 'COMPETIÇÃO', emoji: '🏆',
     channels: [
-      { name: 'classificação', readOnly: true, webhook: 'LeaderboardWebhookUrl',
+      { name: 'classificação', emoji: '📊', readOnly: true, webhook: 'LeaderboardWebhookUrl',
         topic: 'Classificação semanal por pista. Nova semana à segunda-feira; as anteriores ficam aqui.' },
-      { name: 'runs', readOnly: true, webhook: 'RunsWebhookUrl',
+      { name: 'runs', emoji: '💨', readOnly: true, webhook: 'RunsWebhookUrl',
         topic: 'Novos líderes, subidas no top e vencedores de cada semana.' },
-      { name: 'hall-da-fama', readOnly: true, topic: 'Campeões semanais e momentos para a história.' },
-      { name: 'layouts', readOnly: true, topic: 'Pistas com layout oficial de julgamento.' },
-      { name: 'conversa-competição', topic: 'Fala das runs, das notas e da classificação.' },
+      { name: 'hall-da-fama', emoji: '👑', readOnly: true, topic: 'Campeões semanais e momentos para a história.' },
+      { name: 'layouts', emoji: '🗺️', readOnly: true, topic: 'Pistas com layout oficial de julgamento.' },
+      { name: 'conversa-competição', emoji: '💬', topic: 'Fala das runs, das notas e da classificação.' },
     ],
   },
   {
-    name: 'EVENTOS',
+    name: 'EVENTOS', emoji: '📅',
     channels: [
-      { name: 'calendário', kind: 'announcement', readOnly: true, topic: 'Próximos eventos, treinos livres e batalhas de tandem.' },
-      { name: 'inscrições', kind: 'forum', topic: 'Um tópico por evento: inscreve-te respondendo ao tópico.',
+      { name: 'calendário', emoji: '🗓️', kind: 'announcement', readOnly: true, topic: 'Próximos eventos, treinos livres e batalhas de tandem.' },
+      { name: 'inscrições', emoji: '✍️', kind: 'forum', topic: 'Um tópico por evento: inscreve-te respondendo ao tópico.',
         tags: ['Aberto', 'Fechado', 'Tandem', 'Solo'] },
-      { name: 'resultados', readOnly: true, topic: 'Resultados e chaves dos eventos.' },
-      { name: 'conversa-eventos', topic: 'Antes, durante e depois dos eventos.' },
+      { name: 'resultados', emoji: '🥇', readOnly: true, topic: 'Resultados e chaves dos eventos.' },
+      { name: 'conversa-eventos', emoji: '🎤', topic: 'Antes, durante e depois dos eventos.' },
     ],
   },
   {
-    name: 'COMUNIDADE',
+    name: 'COMUNIDADE', emoji: '🤝',
     channels: [
-      { name: 'geral', topic: 'Conversa geral sobre drift e tudo o resto.' },
-      { name: 'apresentações', topic: 'És novo? Diz olá: de onde és, que volante tens, que carro preferes.' },
-      { name: 'clips-e-fotos', topic: 'Mostra as tuas melhores runs, tandems e fotos. Só media — conversa nos tópicos.' },
-      { name: 'procura-tandem', topic: 'Procura parceiros para tandem e marca sessões.' },
-      { name: 'drift-real', topic: 'Drift na vida real: eventos, campeonatos, carros e trackdays.' },
-      { name: 'sim-rigs', topic: 'Volantes, pedais, cockpits, monitores e VR.' },
-      { name: 'off-topic', topic: 'Tudo o que não é drift.' },
-      { name: 'sugestões', kind: 'forum', topic: 'Ideias para o servidor, a app, o Discord ou os eventos. Um tópico por ideia.',
+      { name: 'geral', emoji: '💬', topic: 'Conversa geral sobre drift e tudo o resto.' },
+      { name: 'apresentações', emoji: '🙋', topic: 'És novo? Diz olá: de onde és, que volante tens, que carro preferes.' },
+      { name: 'clips-e-fotos', emoji: '🎬', topic: 'Mostra as tuas melhores runs, tandems e fotos. Só media — conversa nos tópicos.' },
+      { name: 'procura-tandem', emoji: '🏎️', topic: 'Procura parceiros para tandem e marca sessões.' },
+      { name: 'drift-real', emoji: '🔥', topic: 'Drift na vida real: eventos, campeonatos, carros e trackdays.' },
+      { name: 'sim-rigs', emoji: '🎮', topic: 'Volantes, pedais, cockpits, monitores e VR.' },
+      { name: 'off-topic', emoji: '🍿', topic: 'Tudo o que não é drift.' },
+      { name: 'sugestões', emoji: '💡', kind: 'forum', topic: 'Ideias para o servidor, a app, o Discord ou os eventos. Um tópico por ideia.',
         tags: ['Servidor', 'App', 'Discord', 'Eventos', 'Feito'] },
     ],
   },
   {
-    name: 'APRENDER',
+    name: 'APRENDER', emoji: '🎓',
     channels: [
-      { name: 'guia-para-novatos', readOnly: true, topic: 'Do zero ao primeiro drift limpo.' },
-      { name: 'técnica-e-dicas', topic: 'Iniciar o drift, transições, ângulo, linha e controlo.' },
-      { name: 'pedir-feedback', kind: 'forum', topic: 'Partilha uma run e pede opiniões. Um tópico por run.',
+      { name: 'guia-para-novatos', emoji: '🔰', readOnly: true, topic: 'Do zero ao primeiro drift limpo.' },
+      { name: 'técnica-e-dicas', emoji: '🧠', topic: 'Iniciar o drift, transições, ângulo, linha e controlo.' },
+      { name: 'pedir-feedback', emoji: '🎯', kind: 'forum', topic: 'Partilha uma run e pede opiniões. Um tópico por run.',
         tags: ['Novato', 'Intermédio', 'Avançado', 'Tandem'] },
-      { name: 'setups', kind: 'forum', topic: 'Setups por carro e pista. Um tópico por setup.',
+      { name: 'setups', emoji: '🔧', kind: 'forum', topic: 'Setups por carro e pista. Um tópico por setup.',
         tags: ['Nissan GT-R', 'Mondello', 'Iniciante', 'Competição'] },
     ],
   },
   {
-    name: 'CONTEÚDO',
+    name: 'CONTEÚDO', emoji: '📦',
     channels: [
-      { name: 'carros', readOnly: true, topic: 'Carros do servidor e downloads.' },
-      { name: 'pistas', readOnly: true, topic: 'Pistas do servidor e downloads.' },
-      { name: 'mods-recomendados', readOnly: true, topic: 'O essencial para ter o Assetto Corsa como deve ser.' },
-      { name: 'skins-e-liveries', kind: 'forum', topic: 'Partilha as tuas pinturas. Um tópico por skin, com imagens e download.',
+      { name: 'carros', emoji: '🚗', readOnly: true, topic: 'Carros do servidor e downloads.' },
+      { name: 'pistas', emoji: '🛣️', readOnly: true, topic: 'Pistas do servidor e downloads.' },
+      { name: 'mods-recomendados', emoji: '🧩', readOnly: true, topic: 'O essencial para ter o Assetto Corsa como deve ser.' },
+      { name: 'skins-e-liveries', emoji: '🎨', kind: 'forum', topic: 'Partilha as tuas pinturas. Um tópico por skin, com imagens e download.',
         tags: ['Nissan GT-R', 'Pedido', 'Equipa'] },
-      { name: 'streams-e-vídeos', topic: 'Vais fazer live ou publicaste um vídeo? Partilha aqui.' },
+      { name: 'streams-e-vídeos', emoji: '📺', topic: 'Vais fazer live ou publicaste um vídeo? Partilha aqui.' },
     ],
   },
   {
-    name: 'SUPORTE',
+    name: 'SUPORTE', emoji: '🛟',
     channels: [
-      { name: 'ajuda', kind: 'forum', topic: 'Problemas a entrar, a instalar conteúdo ou com o jogo. Um tópico por problema.',
+      { name: 'ajuda', emoji: '🙏', kind: 'forum', topic: 'Problemas a entrar, a instalar conteúdo ou com o jogo. Um tópico por problema.',
         tags: ['Instalação', 'Servidor', 'App', 'Resolvido'] },
-      { name: 'bugs-da-app', topic: 'Algo estranho na app de julgamento? Conta o que aconteceu, com print se possível.' },
+      { name: 'bugs-da-app', emoji: '🐞', topic: 'Algo estranho na app de julgamento? Conta o que aconteceu, com print se possível.' },
     ],
   },
   {
-    name: 'VOZ',
+    name: 'VOZ', emoji: '🔊',
     channels: [
-      { name: 'Lobby', kind: 'voice' },
-      { name: 'Tandem 1', kind: 'voice', userLimit: 4 },
-      { name: 'Tandem 2', kind: 'voice', userLimit: 4 },
-      { name: 'Tandem 3', kind: 'voice', userLimit: 4 },
-      { name: 'Treino e Dicas', kind: 'voice' },
-      { name: 'A Ver Lives', kind: 'voice' },
-      { name: 'Conversa', kind: 'voice' },
-      { name: 'AFK', kind: 'voice', afk: true },
+      { name: 'Lobby', emoji: '🛋️', kind: 'voice' },
+      { name: 'Tandem 1', emoji: '🏎️', kind: 'voice', userLimit: 4 },
+      { name: 'Tandem 2', emoji: '🏎️', kind: 'voice', userLimit: 4 },
+      { name: 'Tandem 3', emoji: '🏎️', kind: 'voice', userLimit: 4 },
+      { name: 'Treino e Dicas', emoji: '🎓', kind: 'voice' },
+      { name: 'A Ver Lives', emoji: '📺', kind: 'voice' },
+      { name: 'Conversa', emoji: '☕', kind: 'voice' },
+      { name: 'AFK', emoji: '💤', kind: 'voice', afk: true },
     ],
   },
   {
-    name: 'EVENTOS AO VIVO',
+    name: 'EVENTOS AO VIVO', emoji: '🎙️',
     channels: [
-      { name: 'Palco do Evento', kind: 'stage', topic: 'Briefing, apresentação dos pilotos e entrega de prémios.' },
-      { name: 'Pilotos em Pista', kind: 'voice' },
-      { name: 'Comentadores', kind: 'voice', userLimit: 4 },
-      { name: 'Juízes', kind: 'voice', staffOnly: true },
+      { name: 'Palco do Evento', emoji: '🎙️', kind: 'stage', topic: 'Briefing, apresentação dos pilotos e entrega de prémios.' },
+      { name: 'Pilotos em Pista', emoji: '🏁', kind: 'voice' },
+      { name: 'Comentadores', emoji: '🎧', kind: 'voice', userLimit: 4 },
+      { name: 'Juízes', emoji: '⚖️', kind: 'voice', staffOnly: true },
     ],
   },
   {
-    name: 'STAFF',
+    name: 'STAFF', emoji: '🔒',
     staffOnly: true,
     channels: [
-      { name: 'staff-geral', topic: 'Conversa da equipa.' },
-      { name: 'avisos-do-discord', topic: 'Avisos que o Discord envia aos admins de servidores Comunidade.', updatesChannel: true },
-      { name: 'decisões-dos-juízes', topic: 'Revisões de runs e decisões tomadas, para ficar registado.' },
-      { name: 'moderação', topic: 'Avisos, kicks e bans — com o motivo.' },
-      { name: 'layouts-em-preparação', topic: 'Pistas novas a preparar no editor antes de publicar.' },
-      { name: 'organização-de-eventos', topic: 'Planeamento de eventos: datas, formato, prémios.' },
-      { name: 'Reunião da Staff', kind: 'voice' },
+      { name: 'staff-geral', emoji: '💬', topic: 'Conversa da equipa.' },
+      { name: 'avisos-do-discord', emoji: '📨', topic: 'Avisos que o Discord envia aos admins de servidores Comunidade.', updatesChannel: true },
+      { name: 'decisões-dos-juízes', emoji: '⚖️', topic: 'Revisões de runs e decisões tomadas, para ficar registado.' },
+      { name: 'moderação', emoji: '🛡️', topic: 'Avisos, kicks e bans — com o motivo.' },
+      { name: 'layouts-em-preparação', emoji: '📐', topic: 'Pistas novas a preparar no editor antes de publicar.' },
+      { name: 'organização-de-eventos', emoji: '📋', topic: 'Planeamento de eventos: datas, formato, prémios.' },
+      { name: 'Reunião da Staff', emoji: '🗣️', kind: 'voice' },
     ],
   },
 ];

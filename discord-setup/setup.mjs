@@ -11,7 +11,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ROLES, CATEGORIES, MESSAGES, SERVER_JOIN_URL } from './content.mjs';
+import { ROLES, CATEGORIES, MESSAGES, SERVER_JOIN_URL, displayName } from './content.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const outDir = path.join(repo, 'dist', 'discord');
@@ -111,24 +111,32 @@ function overwritesFor(spec, category) {
 // Channels --------------------------------------------------------------------
 let channels = await api('GET', `/guilds/${guild.id}/channels`);
 const channelIds = {};
+state.channels ??= {}; // key → channel id, so renames (emoji, spacer) keep the same channel
 
-async function ensureChannel(name, kind, parentId, extra) {
+// `key` is the stable name from content.mjs; `shownName` is what Discord displays.
+async function ensureChannel(key, shownName, kind, parentId, extra) {
   const type = TYPE[kind];
   // An existing text channel may become an announcement channel once Community is on.
   const sameFamily = c => c.type === type || (kind === 'announcement' && c.type === TYPE.text);
-  const existing = channels.find(c => c.name === name && sameFamily(c) && (c.parent_id ?? null) === (parentId ?? null));
-  const body = { name, parent_id: parentId, ...extra };
+  const stateKey = `${kind === 'category' ? 'category' : 'channel'}:${key}`;
+  const existing = channels.find(c => c.id === state.channels[stateKey] && sameFamily(c))
+    ?? channels.find(c => (c.name === shownName || c.name === key) && sameFamily(c)
+      && (c.parent_id ?? null) === (parentId ?? null));
+  const body = { name: shownName, parent_id: parentId, ...extra };
   if (existing && existing.type !== type) body.type = type;
   const channel = existing
     ? await api('PATCH', `/channels/${existing.id}`, body)
     : await api('POST', `/guilds/${guild.id}/channels`, { ...body, type });
   if (!existing) channels.push(channel);
+  else channels[channels.indexOf(existing)] = channel;
+  state.channels[stateKey] = channel.id;
+  saveState();
   return channel;
 }
 
 async function buildChannels(onlyBasic) {
   for (const [position, category] of CATEGORIES.entries()) {
-    const parent = await ensureChannel(category.name, 'category', null, {
+    const parent = await ensureChannel(category.name, displayName(category, true), 'category', null, {
       position, permission_overwrites: category.staffOnly ? staffOnly() : [],
     });
     for (const [index, spec] of category.channels.entries()) {
@@ -138,11 +146,11 @@ async function buildChannels(onlyBasic) {
       if (spec.topic && kind !== 'voice' && kind !== 'stage') extra.topic = spec.topic;
       if (spec.userLimit) extra.user_limit = spec.userLimit;
       if (kind === 'forum' && spec.tags) {
-        const existing = channels.find(c => c.name === spec.name && c.type === TYPE.forum);
+        const existing = channels.find(c => c.id === state.channels[`channel:${spec.name}`] && c.type === TYPE.forum);
         const known = existing?.available_tags ?? [];
         extra.available_tags = spec.tags.map(name => known.find(tag => tag.name === name) ?? { name });
       }
-      const channel = await ensureChannel(spec.name, kind, parent.id, extra);
+      const channel = await ensureChannel(spec.name, displayName(spec), kind, parent.id, extra);
       channelIds[spec.name] = channel.id;
       if (!onlyBasic) console.log(`${kind.padEnd(12)} ${spec.name}`);
     }
