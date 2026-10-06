@@ -16,6 +16,10 @@ export const displayName = (spec, isCategory = false) =>
 
 export const SERVER_JOIN_URL ='https://acstuff.ru/s/q:race/online/join?ip=45.131.108.170&httpPort=9055';
 
+// Google Drive downloads of what the server runs (shared "anyone with the link").
+export const CAR_DOWNLOAD_URL = 'https://drive.google.com/file/d/1ZNqAIFWX11pZ9o_Kkky1X5jMSHOaUcKX/view?usp=sharing';
+export const TRACK_DOWNLOAD_URL = 'https://drive.google.com/file/d/1bise65vhpFfxisXy-Ro7FTcoYmWw3eKF/view?usp=sharing';
+
 // Brand colors (driftfactory.pt).
 export const LIME = 0xd4ff3f;
 export const MAGENTA = 0xff3ec8;
@@ -320,7 +324,9 @@ export const MESSAGES = {
     color: LIME,
     description: [
       '**DriftFactory Nissan GT-R** (`driftfactory_nissan_gtr`)',
-      'Download: _em breve_',
+      `[⬇️ Download (Google Drive)](${CAR_DOWNLOAD_URL})`,
+      '',
+      'Instala: arrasta o `.rar` para a janela do Content Manager e confirma, ou extrai a pasta para `assettocorsa/content/cars`.',
     ].join('\n'),
   }],
   'pistas': [{
@@ -328,7 +334,9 @@ export const MESSAGES = {
     color: LIME,
     description: [
       '**VDC Mondello 2022** (`vdc_mondello_2022`)',
-      'Download: _em breve_',
+      `[⬇️ Download (Google Drive)](${TRACK_DOWNLOAD_URL})`,
+      '',
+      'Instala: arrasta o `.rar` para a janela do Content Manager e confirma, ou extrai a pasta para `assettocorsa/content/tracks`.',
     ].join('\n'),
   }],
   'mods-recomendados': [{
