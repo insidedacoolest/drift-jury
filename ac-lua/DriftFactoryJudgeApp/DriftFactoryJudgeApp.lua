@@ -13,7 +13,8 @@ local UI = require('src.ui_app')
 -- A server that delivers the Drift Factory online script already gives
 -- every player the judge; running this installed copy as well would draw a
 -- second HUD and report every run twice. Detected from the server's CSP
--- extra options, which name the script's URL.
+-- extra options: served by the DriftFactoryPlugin, the section is named
+-- after driftfactory.lua; linked directly, its URL points at this repo.
 local function serverProvidesJudge()
   local sim = ac.getSim()
   if not (sim and sim.isOnlineRace) or not ac.INIConfig or not ac.INIConfig.onlineExtras then return false end
@@ -21,8 +22,10 @@ local function serverProvidesJudge()
   if not ok or not config or not config.sections then return false end
   for name, section in pairs(config.sections) do
     if tostring(name):upper():find('^SCRIPT') then
-      local script = section.SCRIPT and section.SCRIPT[1] or ''
-      if tostring(script):lower():find('drift-jury', 1, true) then return true end
+      local script = tostring(section.SCRIPT and section.SCRIPT[1] or ''):lower()
+      if tostring(name):lower():find('driftfactory', 1, true) or script:find('drift-jury', 1, true) then
+        return true
+      end
     end
   end
   return false

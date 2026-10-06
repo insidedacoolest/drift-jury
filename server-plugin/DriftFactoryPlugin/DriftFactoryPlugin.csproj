@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net8.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <EnableDynamicLoading>true</EnableDynamicLoading>
+        <SelfContained>false</SelfContained>
+        <DebugType>embedded</DebugType>
+        <Version>0.2.0</Version>
+        <!-- AssettoServer source checkout at the tag the server runs (v0.0.54);
+             pass -p:AssettoServerSrc=... to point elsewhere. -->
+        <AssettoServerSrc Condition="'$(AssettoServerSrc)' == ''">..\..\..\AssettoServer</AssettoServerSrc>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="$(AssettoServerSrc)\AssettoServer.Shared\AssettoServer.Shared.csproj">
+            <Private>false</Private>
+            <ExcludeAssets>runtime</ExcludeAssets>
+        </ProjectReference>
+        <ProjectReference Include="$(AssettoServerSrc)\AssettoServer\AssettoServer.csproj">
+            <Private>false</Private>
+            <ExcludeAssets>runtime</ExcludeAssets>
+        </ProjectReference>
+    </ItemGroup>
+
+    <ItemGroup>
+        <!-- Fallback copy of the online script, used if GitHub can't be reached at server start. -->
+        <EmbeddedResource Include="..\..\online\driftfactory.lua" LogicalName="DriftFactoryPlugin.driftfactory.lua" />
+    </ItemGroup>
+
+</Project>

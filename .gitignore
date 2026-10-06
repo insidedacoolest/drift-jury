@@ -1,1 +1,3 @@
 dist/
+server-plugin/**/bin/
+server-plugin/**/obj/
