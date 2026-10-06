@@ -42,12 +42,12 @@ Original DriftJudging SP: https://www.patreon.com/DeadEndReece/posts/driftjudges
 - Scoring rebuilt on the Drift Masters judging rules 2026 (qualifying,
   sections 1.6–1.8): line 60 (each zone and clip an equal share), angle 20,
   style 20 split into initiation 5 (early, rate to angle, smooth; double
-  initiation halves it), fluidity 10 (settled car, lock-to-lock
+  initiation scores 0), fluidity 10 (settled car, lock-to-lock
   transitions) and commitment 5 (pace, consistency, throttle). The original
   weighted line 35, angle 35, style/speed 30.
-- Deductions instead of voiding for: wall/car contact (−2/−5/−10 by speed
-  lost), one or two wheels off (−2) and short straightening (−3).
-  Incomplete runs follow the same rules: spin, stop drifting (1.5 s
+- Deductions instead of voiding for: wall/car contact (−5/−10/−20 by speed
+  lost), one or two wheels off (−5) and short straightening (−5).
+  Incomplete runs follow the same rules: spin, stop drifting (1 s
   straight), three wheels off.
 - (Further changes get listed here as they're made.)
 

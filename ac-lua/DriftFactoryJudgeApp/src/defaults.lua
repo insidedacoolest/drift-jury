@@ -20,15 +20,15 @@ M.flow = {
   -- in the last meters before the finish. The short grace lets a quick
   -- left/right transition pass through zero.
   straightenAngleDeg = 5,
-  straightenGraceSeconds = 0.4,
-  stopDriftingSeconds = 1.5,
-  straightenDeduction = 3,
+  straightenGraceSeconds = 0.3,
+  stopDriftingSeconds = 1.0,
+  straightenDeduction = 5,
   -- Track limits: one or two wheels off is "tire off course" (deduction),
   -- three wheels off the marked track is an incomplete run.
   offTrackWheels = 3,
   offTrackGraceSeconds = 0.25,
   tireOffWheels = 1,
-  tireOffDeduction = 2,
+  tireOffDeduction = 5,
   -- Stopping: speed below this, once the car has launched (passed launchedSpeedKmh).
   launchedSpeedKmh = 15,
   stopSpeedKmh = 5,
@@ -41,9 +41,9 @@ M.flow = {
   contactMeasureSeconds = 0.4,
   contactMediumLossKmh = 5,
   contactHardLossKmh = 15,
-  contactLightPenalty = 2,
-  contactMediumPenalty = 5,
-  contactHardPenalty = 10
+  contactLightPenalty = 5,
+  contactMediumPenalty = 10,
+  contactHardPenalty = 20
 }
 
 M.scoring = {
@@ -63,7 +63,7 @@ M.scoring = {
   -- exclusion, nothing after initiationZeroMeters. Rate to angle: meters from
   -- there to initiationRateAngleShare of the target angle. Smooth: angle given
   -- back inside the initiation window. Dropping out of the drift and
-  -- initiating again in that window is a double initiation (halves it).
+  -- initiating again in that window is a double initiation (scores 0).
   initiationFullMeters = 12,
   initiationZeroMeters = 40,
   initiationWindowMeters = 20,
@@ -71,7 +71,7 @@ M.scoring = {
   initiationRateFullMeters = 4,
   initiationRateZeroMeters = 16,
   initiationSmoothDropRangeDeg = 30,
-  doubleInitiationFactor = 0.5,
+  doubleInitiationFactor = 0,
   -- Fluidity: settled car (few abrupt corrections) and transitions that
   -- rotate quickly from high angle to high angle (lock to lock).
   fluidityTransitionWeight = 0.50,

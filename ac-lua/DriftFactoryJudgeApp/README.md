@@ -94,7 +94,7 @@ up to 100 points:
 - **Style — 20**:
   - **Initiation 5**: early (drift established within 12 m after the start
     zone, nothing after 40 m), rate to angle (meters to 80% of the target
-    angle) and smooth (no angle given back). A double initiation halves it.
+    angle) and smooth (no angle given back). A double initiation scores 0.
   - **Fluidity 10**: car settled (few abrupt steering, throttle and angle
     corrections) and, where the course has them, quick lock-to-lock
     transitions (high angle to high angle).
@@ -102,13 +102,13 @@ up to 100 points:
     drops) and consistent throttle.
   Fluidity and commitment only count while actually drifting (15°→30°).
 
-**Deductions**: a wall or car contact −2, −5 (lost 5 km/h or more) or −10
-(lost 15 km/h or more); one or two wheels off track −2; a short
-straightening (correction, angle under 5° for 0.4 s) −3. A scrape or a
+**Deductions**: a wall or car contact −5, −10 (lost 5 km/h or more) or −20
+(lost 15 km/h or more); one or two wheels off track −5; a short
+straightening (correction, angle under 5° for 0.3 s) −5. A scrape or a
 continuous mistake counts once. Deductions never void a run.
 
 **Incomplete run** (0 points): spinning out, stop drifting (straight for
-1.5 s), three wheels off track, plus a jump start, driving the wrong way,
+1 s), three wheels off track, plus a jump start, driving the wrong way,
 stopping, no progress for 4 s or going over 90 s.
 
 **Ties** on the server leaderboard follow the Drift Masters tie breaker:
