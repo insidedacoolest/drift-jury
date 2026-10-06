@@ -22,7 +22,13 @@ public class DriftFactoryConfiguration
     /// <summary>Content Manager join link shown in the status message.</summary>
     public string? JoinUrl { get; init; }
 
-    /// <summary>How often the status message is refreshed.</summary>
+    /// <summary>Where the Drift Virtual page on driftfactory.pt receives the live data.</summary>
+    public string SiteSyncUrl { get; init; } = "https://driftfactory.pt/api/virtual/sync";
+
+    /// <summary>Key the site checks before accepting data; sending to the site is off without it.</summary>
+    public string? SiteSyncKey { get; init; }
+
+    /// <summary>How often the status message (and the site's data) is refreshed.</summary>
     public int StatusIntervalSeconds { get; init; } = 60;
 
     /// <summary>Weeks run Monday 00:00 to Sunday 23:59 in this time zone.</summary>

@@ -50,8 +50,19 @@ DataDirectory: driftfactory-data
 right now (track, players, cars, join link), this week's leaderboard (top
 50, with the line/angle/style breakdown) and the finished weeks (top 10
 each, most recent first, up to a year). Read-only and public — the same
-information Discord shows, without Steam ids. The Drift Virtual page on
-driftfactory.pt (`web/app/lib/virtualServer.js`) reads it every minute.
+information Discord shows, without Steam ids.
+
+The site's hosting can't reach the game server's HTTP port, so since 0.5
+the plugin also pushes the same snapshot every minute (and right after a
+new weekly best) to the Drift Virtual page on driftfactory.pt:
+
+```yaml
+SiteSyncUrl: https://driftfactory.pt/api/virtual/sync   # default
+SiteSyncKey: <key>   # dist/site/site-sync-key.txt; the site only keeps its SHA-256
+```
+
+Without `SiteSyncKey` nothing is sent. The page shows the server as
+offline once the last push is over three minutes old.
 
 ## Building
 

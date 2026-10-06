@@ -33,6 +33,7 @@ public class DriftFactoryCommunity : CriticalBackgroundService, IAssettoServerAu
     private readonly DiscordWebhook? _statusHook;
     private readonly DiscordWebhook? _leaderboardHook;
     private readonly DiscordWebhook? _runsHook;
+    private readonly SitePublisher? _site;
     private readonly Channel<Announcement> _announcements = Channel.CreateUnbounded<Announcement>();
     private readonly Dictionary<string, (float, bool, float, float, float)> _lastPayload = new();
     private readonly Dictionary<string, string> _displayNames = new();
@@ -53,6 +54,7 @@ public class DriftFactoryCommunity : CriticalBackgroundService, IAssettoServerAu
         _statusHook = DiscordWebhook.FromUrl(configuration.StatusWebhookUrl);
         _leaderboardHook = DiscordWebhook.FromUrl(configuration.LeaderboardWebhookUrl);
         _runsHook = DiscordWebhook.FromUrl(configuration.RunsWebhookUrl);
+        _site = SitePublisher.FromConfiguration(configuration);
         _track = string.IsNullOrEmpty(serverConfiguration.Server.TrackConfig)
             ? serverConfiguration.Server.Track
             : $"{serverConfiguration.Server.Track}/{serverConfiguration.Server.TrackConfig}";
@@ -102,25 +104,35 @@ public class DriftFactoryCommunity : CriticalBackgroundService, IAssettoServerAu
         var nextStatus = DateTime.MinValue;
         while (!stoppingToken.IsCancellationRequested)
         {
+            // The site gets the same refresh as the Discord status, and right
+            // away after a new weekly best.
+            var siteDue = false;
             try
             {
                 await CloseFinishedWeeksAsync(stoppingToken);
 
                 while (_announcements.Reader.TryRead(out var announcement))
                 {
+                    siteDue = true;
                     await AnnounceAsync(announcement, stoppingToken);
                     await UpdateLeaderboardAsync(announcement.Outcome.Week, final: false, stoppingToken);
                 }
 
                 if (DateTime.UtcNow >= nextStatus)
                 {
-                    await UpdateStatusAsync(stoppingToken);
+                    siteDue = true;
                     nextStatus = DateTime.UtcNow.AddSeconds(Math.Max(15, _configuration.StatusIntervalSeconds));
+                    await UpdateStatusAsync(stoppingToken);
                 }
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 Log.Error(ex, "DriftFactoryPlugin: Discord update failed");
+            }
+
+            if (siteDue && _site != null)
+            {
+                await _site.PublishAsync(SiteSnapshot(), stoppingToken);
             }
 
             // Wake up for the next status refresh or as soon as a result arrives.
