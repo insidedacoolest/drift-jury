@@ -23,7 +23,7 @@ local function status(state, message)
 end
 
 function M.new(context)
-  return setmetatable({
+  local session = setmetatable({
     context = context,
     state = 'idle',
     countdownRemaining = 0,
@@ -43,8 +43,71 @@ function M.new(context)
     lastProgressPosition = nil,
     resultAge = 99,
     message = '',
-    messageAge = 99
+    messageAge = 99,
+    deductions = {},
+    contact = nil,
+    recentSpeeds = {}
   }, M)
+  -- Walls and other cars: CSP calls this once as each contact starts.
+  if ac.onCarCollision then
+    ac.onCarCollision(0, function() session:onCollision() end)
+  end
+  return session
+end
+
+local function contactPenalty(lossKmh)
+  local flow = D.flow
+  if lossKmh >= flow.contactHardLossKmh then return flow.contactHardPenalty end
+  if lossKmh >= flow.contactMediumLossKmh then return flow.contactMediumPenalty end
+  return flow.contactLightPenalty
+end
+
+function M:onCollision()
+  if self.state ~= 'running' then return end
+  local now = U.round(self.runElapsed * 1000)
+  local car = ac.getCar(0)
+  local withCar = car ~= nil and (tonumber(car.collidedWith) or 0) ~= 0
+  if self.contact and now - self.contact.lastAt <= D.flow.contactMergeSeconds * 1000 then
+    self.contact.lastAt = now
+    self.contact.withCar = self.contact.withCar or withCar
+    return
+  end
+  self:closeContact()
+  -- Speed just before the hit: the fastest of the last few samples.
+  local before = car and tonumber(car.speedKmh) or 0
+  for _, speed in ipairs(self.recentSpeeds) do before = math.max(before, speed) end
+  self.contact = { startAt = now, lastAt = now, speedBefore = before, minSpeed = before, withCar = withCar }
+end
+
+-- Takes points off the run (Drift Masters "deductions"); the HUD flashes it.
+function M:deduct(kind, points, label, at)
+  self.penalties = self.penalties + points
+  self.deductions[#self.deductions + 1] = { kind = kind, points = points }
+  self.lastDeductionKind, self.lastDeductionPoints = kind, points
+  self.lastDeductionAt = at or U.round(self.runElapsed * 1000)
+  status(self, string.format('%s: -%d pontos.', label, points))
+end
+
+-- Settles the open contact (if any) into a deduction.
+function M:closeContact()
+  local contact = self.contact
+  if not contact then return end
+  self.contact = nil
+  local loss = math.max(0, contact.speedBefore - contact.minSpeed)
+  self:deduct('contact', contactPenalty(loss), contact.withCar and 'Toque num carro' or 'Toque no muro', contact.startAt)
+end
+
+-- Called for every sample while running: tracks how much speed the open
+-- contact costs and closes it once the measuring window has passed.
+function M:trackContact(sample)
+  table.insert(self.recentSpeeds, sample.speedKmh)
+  if #self.recentSpeeds > 5 then table.remove(self.recentSpeeds, 1) end
+  local contact = self.contact
+  if not contact then return end
+  contact.minSpeed = math.min(contact.minSpeed, sample.speedKmh)
+  if sample.timeMilliseconds - contact.lastAt >= D.flow.contactMeasureSeconds * 1000 then
+    self:closeContact()
+  end
 end
 
 function M:isBusy()
@@ -146,10 +209,19 @@ end
 function M:sustained(rule, condition, now, graceSeconds)
   if not condition then
     self.ruleSince[rule] = nil
+    self.ruleFired[rule] = nil
     return false
   end
   self.ruleSince[rule] = self.ruleSince[rule] or now
   return now - self.ruleSince[rule] >= graceSeconds * 1000
+end
+
+-- Like sustained(), but true only once per episode: the condition has to
+-- clear before the same rule can fire again (one deduction per mistake).
+function M:episode(rule, condition, now, graceSeconds)
+  if not self:sustained(rule, condition, now, graceSeconds) or self.ruleFired[rule] then return false end
+  self.ruleFired[rule] = true
+  return true
 end
 
 function M:beginCountdown()
@@ -168,6 +240,8 @@ function M:beginCountdown()
   self.state = 'countdown'
   self.countdownRemaining = D.flow.countdownSeconds
   self.samples, self.penalties, self.invalid, self.invalidReason = {}, 0, false, ''
+  self.deductions, self.contact, self.recentSpeeds, self.lastDeductionAt = {}, nil, {}, nil
+  self.ruleFired = {}
   self.previousPosition, self.spinSince = nil, nil
   self.ruleSince, self.driftEngaged = {}, false
   self:resetProgress()
@@ -177,7 +251,7 @@ end
 function M:beginRun()
   self.state = 'running'
   self.runElapsed, self.sampleAccumulator = 0, 0
-  self.ruleSince, self.driftEngaged, self.launched = {}, false, false
+  self.ruleSince, self.ruleFired, self.driftEngaged, self.launched = {}, {}, false, false
   self.courseLength = routeLength(self.context.layout.pathWaypoints)
   self:resetProgress()
   local first = self:sample(0)
@@ -237,12 +311,22 @@ function M:checkInvalid(sample)
   -- A stopped car has no slip angle either; that case is reported as a stop.
   local straight = self.driftEngaged and sample.angleDeg < flow.straightenAngleDeg
     and sample.speedKmh >= flow.stopSpeedKmh and remaining > scoring.finishExclusionMeters
-  if self:sustained('straighten', straight, now, flow.straightenGraceSeconds) then
-    self:markInvalid('Endireitou o carro')
+  -- A short straightening is a correction (deduction); staying straight is
+  -- "stop drifting" (incomplete).
+  if self:episode('straighten', straight, now, flow.straightenGraceSeconds) then
+    self:deduct('straighten', flow.straightenDeduction, 'Endireitou (correção)', now)
+  end
+  if self:sustained('stopDrifting', straight, now, flow.stopDriftingSeconds) then
+    self:markInvalid('Parou de derrapar')
   end
 
-  if self:sustained('offTrack', (sample.wheelsOutside or 0) >= flow.offTrackWheels, now, flow.offTrackGraceSeconds) then
-    self:markInvalid('Saiu da pista')
+  -- Track limits: three wheels off is incomplete, one or two a deduction.
+  local wheelsOff = sample.wheelsOutside or 0
+  if self:sustained('offTrack', wheelsOff >= flow.offTrackWheels, now, flow.offTrackGraceSeconds) then
+    self:markInvalid('Três rodas fora da pista')
+  end
+  if self:episode('tireOff', wheelsOff >= flow.tireOffWheels, now, flow.offTrackGraceSeconds) then
+    self:deduct('tireOff', flow.tireOffDeduction, 'Roda fora da pista', now)
   end
 
   -- Stopping: only after the launch, so a slow reaction at "Vai!" isn't a stop
@@ -255,10 +339,18 @@ end
 
 function M:finish(reason)
   local context = self.context
+  self:closeContact()
   local score = Scoring.scoreLead(
     self.samples, context.layout, context.scoring, self.penalties, self.invalid, self.invalidReason)
   score.reason = score.valid and 'Válida' or (self.invalidReason ~= '' and self.invalidReason or reason)
   score.calibration = context.calibration.active
+  -- Deductions only matter for a completed run.
+  score.deductionCount = score.valid and #self.deductions or 0
+  local contacts = 0
+  for _, deduction in ipairs(self.deductions) do
+    if deduction.kind == 'contact' then contacts = contacts + 1 end
+  end
+  score.contacts = score.valid and contacts or 0
   context.lastResult = score
   self.resultAge = 0
   if physics.allowed() then physics.disableCarCollisions(0, false, false) end
@@ -343,6 +435,7 @@ function M:update(dt)
       local sample = self:sample(U.round(self.runElapsed * 1000))
       if sample then
         self.samples[#self.samples + 1] = sample
+        self:trackContact(sample)
         self:checkInvalid(sample)
         if self.invalid then self:finish(self.invalidReason) return end
         if self.previousPosition and G.crossedGate(

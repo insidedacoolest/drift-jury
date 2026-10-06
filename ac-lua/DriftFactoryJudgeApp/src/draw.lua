@@ -269,7 +269,7 @@ end
 -- Panel heights per state. The HUD only carries what a driver reads at a
 -- glance: the count, angle and speed while driving, and the score (or why
 -- the run was voided) at the end.
-local hudHeights = { countdown = 76, running = 72, result = 100, idle = 92 }
+local hudHeights = { countdown = 76, running = 72, result = 100, idle = 106 }
 
 function M.hudSize(context)
   local state = context.session.state
@@ -326,11 +326,13 @@ local function guide(context, p1)
 
   -- Rules that void a run.
   fill(vec2(p1.x + 20, p1.y + 40), vec2(p2.x - 16, p1.y + 41), rgbm(1, 1, 1, 0.08), 0)
-  textIn('A RUN É INVÁLIDA SE', 9, p1 + vec2(20, 44), vec2(p2.x - 16, p1.y + 56), 'Start', 'Center', BRAND.muted, 'mono')
-  textIn('Arrancar antes · Contramão · Endireitar', 10,
+  textIn('A RUN É INCOMPLETA SE', 9, p1 + vec2(20, 44), vec2(p2.x - 16, p1.y + 56), 'Start', 'Center', BRAND.muted, 'mono')
+  textIn('Arrancar antes · Contramão · Trompo', 10,
     p1 + vec2(20, 57), vec2(p2.x - 12, p1.y + 71), 'Start', 'Center', BRAND.text, 'mono')
-  textIn('Sair da pista · Parar · Trompo', 10,
+  textIn('3 rodas fora · Parar · Deixar de derrapar', 10,
     p1 + vec2(20, 71), vec2(p2.x - 12, p1.y + 85), 'Start', 'Center', BRAND.text, 'mono')
+  textIn('Toques, rodas fora e correções descontam', 9,
+    p1 + vec2(20, 86), vec2(p2.x - 12, p1.y + 98), 'Start', 'Center', BRAND.muted, 'mono')
 end
 
 function M.hud(context, windowMode)
@@ -375,7 +377,15 @@ function M.hud(context, windowMode)
       textIn(string.format('%.0f°', sample.angleDeg), 38, p1 + vec2(20, 4), p1 + vec2(118, 52), 'Start', 'Center', BRAND.text, 'number')
       textIn('ÂNGULO', 10, p1 + vec2(21, 48), p1 + vec2(118, 62), 'Start', 'Center', BRAND.muted, 'mono')
       textIn(string.format('%.0f', sample.speedKmh), 26, p1 + vec2(128, 12), p1 + vec2(210, 48), 'Start', 'Center', BRAND.text, 'number')
-      textIn('KM/H', 10, p1 + vec2(129, 48), p1 + vec2(210, 62), 'Start', 'Center', BRAND.muted, 'mono')
+      -- A deduction (contact, tire off, correction) flashes where the speed label sits.
+      local sinceDeduction = session.lastDeductionAt and (session.runElapsed * 1000 - session.lastDeductionAt) or math.huge
+      if sinceDeduction < 1500 then
+        local labels = { contact = 'TOQUE', tireOff = 'RODA FORA', straighten = 'CORREÇÃO' }
+        textIn(string.format('%s -%d', labels[session.lastDeductionKind] or 'DEDUÇÃO', session.lastDeductionPoints or 0), 10,
+          p1 + vec2(129, 48), p1 + vec2(214, 62), 'Start', 'Center', BRAND.accent2, 'monoBold')
+      else
+        textIn('KM/H', 10, p1 + vec2(129, 48), p1 + vec2(210, 62), 'Start', 'Center', BRAND.muted, 'mono')
+      end
       angleGauge(vec2(p2.x - 44, p1.y + 34), 24, sample.angleDeg, 90,
         context.scoring.targetAngleDeg, rgbm(1, 1, 1, 0.12))
       -- Course progress along the bottom edge.
@@ -391,7 +401,7 @@ function M.hud(context, windowMode)
       fill(p1, p2, withAlpha(BRAND.accent, (1 - phase) * 0.18), 4)
       speedBurst(vec2(p1.x + 52, p1.y + 60), phase, BRAND.accent)
     end
-    textIn(result.personalBest and 'NOVO RECORDE' or (result.valid and 'RESULTADO' or 'RUN INVÁLIDA'),
+    textIn(result.personalBest and 'NOVO RECORDE' or (result.valid and 'RESULTADO' or 'RUN INCOMPLETA'),
       13, p1 + vec2(20, 6), p1 + vec2(220, 26), 'Start', 'Center', accent, 'title')
     textIn(string.format('%.0f', result.score or 0), 52, p1 + vec2(18, 26), p1 + vec2(130, 86), 'Start', 'Center', BRAND.text, 'number')
     textIn('PTS', 10, p1 + vec2(20, 82), p1 + vec2(80, 96), 'Start', 'Center', BRAND.muted, 'mono')
@@ -399,15 +409,22 @@ function M.hud(context, windowMode)
       -- Breakdown: name left, points / max right.
       local scoring = context.scoring or {}
       local rows = {
-        { 'LINHA', result.line, scoring.leadLinePoints or 35 },
-        { 'ÂNGULO', result.angle, scoring.leadAnglePoints or 35 },
-        { 'ESTILO', result.styleSpeed, scoring.leadStyleSpeedPoints or 30 },
+        { 'LINHA', string.format('%.0f/%d', result.line or 0, scoring.leadLinePoints or 35) },
+        { 'ÂNGULO', string.format('%.0f/%d', result.angle or 0, scoring.leadAnglePoints or 35) },
+        { 'ESTILO', string.format('%.0f/%d', result.styleSpeed or 0, scoring.leadStyleSpeedPoints or 30) },
       }
+      -- Wall and car contacts get a fourth row, so the rows close up a little.
+      local penalties = tonumber(result.penalties) or 0
+      if penalties > 0 then
+        local count = tonumber(result.deductionCount) or tonumber(result.contacts) or 0
+        rows[#rows + 1] = { count == 1 and '1 DEDUÇÃO' or string.format('%d DEDUÇÕES', count),
+          string.format('-%.0f', penalties), BRAND.accent2 }
+      end
+      local first, step = #rows > 3 and 24 or 30, #rows > 3 and 18 or 20
       for index, row in ipairs(rows) do
-        local top = p1.y + 30 + (index - 1) * 20
-        textIn(row[1], 11, vec2(p1.x + 150, top), vec2(p1.x + 214, top + 18), 'Start', 'Center', BRAND.muted, 'title')
-        textIn(string.format('%.0f/%d', row[2] or 0, row[3]), 12,
-          vec2(p1.x + 210, top), vec2(p2.x - 16, top + 18), 'End', 'Center', BRAND.text, 'monoBold')
+        local top = p1.y + first + (index - 1) * step
+        textIn(row[1], 11, vec2(p1.x + 150, top), vec2(p2.x - 46, top + 18), 'Start', 'Center', row[3] or BRAND.muted, 'title')
+        textIn(row[2], 12, vec2(p1.x + 210, top), vec2(p2.x - 16, top + 18), 'End', 'Center', row[3] or BRAND.text, 'monoBold')
       end
     else
       -- Voided: the reason is what the driver needs.

@@ -31,14 +31,24 @@ Original DriftJudging SP: https://www.patreon.com/DeadEndReece/posts/driftjudges
   mode.
 - Stricter run rules: besides a spin or no progress, a run is invalid on a
   jump start (moving during the countdown, instead of a 10-point penalty),
-  driving the wrong way, straightening up after the drift has started,
-  leaving the track with all four wheels, or stopping. Thresholds are in
-  `src/defaults.lua` (`M.flow`).
+  driving the wrong way, or stopping (straightening and track limits follow
+  the Drift Masters rules below). Thresholds are in `src/defaults.lua`
+  (`M.flow`).
 - The score HUD uses the DriftFactory brand typefaces, bundled in `fonts/`:
   Saira (Copyright 2020 The Saira Project Authors, github.com/Omnibus-Type/Saira)
   and JetBrains Mono (Copyright 2020 The JetBrains Mono Project Authors,
   github.com/JetBrains/JetBrainsMono), both under the SIL Open Font License
   1.1 — see `fonts/OFL-Saira.txt` and `fonts/OFL-JetBrainsMono.txt`.
+- Scoring rebuilt on the Drift Masters judging rules 2026 (qualifying,
+  sections 1.6–1.8): line 60 (each zone and clip an equal share), angle 20,
+  style 20 split into initiation 5 (early, rate to angle, smooth; double
+  initiation halves it), fluidity 10 (settled car, lock-to-lock
+  transitions) and commitment 5 (pace, consistency, throttle). The original
+  weighted line 35, angle 35, style/speed 30.
+- Deductions instead of voiding for: wall/car contact (−2/−5/−10 by speed
+  lost), one or two wheels off (−2) and short straightening (−3).
+  Incomplete runs follow the same rules: spin, stop drifting (1.5 s
+  straight), three wheels off.
 - (Further changes get listed here as they're made.)
 
 ## Known limitation carried over from this fork

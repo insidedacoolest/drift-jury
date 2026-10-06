@@ -26,6 +26,8 @@ plugin handles it) and keeps:
 - `driftfactory-data/runs.jsonl` — every run, valid or not, for good;
 - `driftfactory-data/state.json` — each driver's best valid run per track
   per week (Monday–Sunday, Europe/Lisbon), plus the Discord message ids.
+  Ties are broken the Drift Masters way: best score, second-best score,
+  then the best run's line, angle and style.
 
 With webhook URLs configured it mirrors that to Discord: a live status
 message, a weekly leaderboard per track (edited in place, marked FINAL at

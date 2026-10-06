@@ -81,6 +81,42 @@ Results are private to the local player and stored separately per track,
 layout, and exact car model. Each file retains a permanent valid PB and the
 latest 50 completed valid or invalid runs.
 
+## Scoring
+
+Qualifying scoring of the Drift Masters judging rules 2026 (sections 1.6–1.8),
+up to 100 points:
+
+- **Line — 60**: every outer zone and inner clip is worth an equal share
+  (rear wheels inside the zone, front bumper at the clip); a missed one scores
+  0. Leaving the drawn route ("off line") weighs 10% of the line.
+- **Angle — 20**: high angle achieved and held in the judged sections;
+  nothing up to 20°, full marks from 55°.
+- **Style — 20**:
+  - **Initiation 5**: early (drift established within 12 m after the start
+    zone, nothing after 40 m), rate to angle (meters to 80% of the target
+    angle) and smooth (no angle given back). A double initiation halves it.
+  - **Fluidity 10**: car settled (few abrupt steering, throttle and angle
+    corrections) and, where the course has them, quick lock-to-lock
+    transitions (high angle to high angle).
+  - **Commitment 5**: pace (full at 90 km/h), keeping it (no big speed
+    drops) and consistent throttle.
+  Fluidity and commitment only count while actually drifting (15°→30°).
+
+**Deductions**: a wall or car contact −2, −5 (lost 5 km/h or more) or −10
+(lost 15 km/h or more); one or two wheels off track −2; a short
+straightening (correction, angle under 5° for 0.4 s) −3. A scrape or a
+continuous mistake counts once. Deductions never void a run.
+
+**Incomplete run** (0 points): spinning out, stop drifting (straight for
+1.5 s), three wheels off track, plus a jump start, driving the wrong way,
+stopping, no progress for 4 s or going over 90 s.
+
+**Ties** on the server leaderboard follow the Drift Masters tie breaker:
+best score, second-best score, then the best run's line, angle and style.
+
+Not judged in-game: the accel/decel map, opposite drift per section, hood
+or doors opening, and "unchaseable" runs.
+
 ## Editor Controls
 
 - Route tool: drag points to move, `Shift`+drag to smooth nearby route nodes,

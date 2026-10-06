@@ -252,28 +252,80 @@ M.flow = {
   -- Driving against the course direction (velocity pointing back along the route).
   wrongWayMinSpeedKmh = 5,
   wrongWayGraceSeconds = 0.5,
-  -- Straightening up: drift angle below this after the drift has started
-  -- (angle reached the minimum angle once), outside the finish exclusion.
-  -- The grace time lets a quick left/right transition pass through zero.
+  -- Straightening up (Drift Masters judging rules 2026, 1.7): once the drift
+  -- has started, the angle dropping below straightenAngleDeg for a moment is
+  -- a "short straightening (correction)" deduction; staying straight for
+  -- stopDriftingSeconds is "stop drifting", an incomplete run. Neither counts
+  -- in the last meters before the finish. The short grace lets a quick
+  -- left/right transition pass through zero.
   straightenAngleDeg = 5,
-  straightenGraceSeconds = 0.75,
-  -- Leaving the track: this many wheels outside the track's valid surface.
-  offTrackWheels = 4,
+  straightenGraceSeconds = 0.4,
+  stopDriftingSeconds = 1.5,
+  straightenDeduction = 3,
+  -- Track limits: one or two wheels off is "tire off course" (deduction),
+  -- three wheels off the marked track is an incomplete run.
+  offTrackWheels = 3,
   offTrackGraceSeconds = 0.25,
+  tireOffWheels = 1,
+  tireOffDeduction = 2,
   -- Stopping: speed below this, once the car has launched (passed launchedSpeedKmh).
   launchedSpeedKmh = 15,
   stopSpeedKmh = 5,
-  stopGraceSeconds = 1.0
+  stopGraceSeconds = 1.0,
+  -- Contact with a wall or another car never voids the run; each one takes
+  -- points off, more for a harder hit. Hardness is the speed lost in the
+  -- moments after the contact starts. Contacts within contactMergeSeconds
+  -- of each other (a scrape along a wall) count once.
+  contactMergeSeconds = 0.5,
+  contactMeasureSeconds = 0.4,
+  contactMediumLossKmh = 5,
+  contactHardLossKmh = 15,
+  contactLightPenalty = 2,
+  contactMediumPenalty = 5,
+  contactHardPenalty = 10
 }
 
 M.scoring = {
-  leadLinePoints = 35,
-  leadAnglePoints = 35,
-  leadStyleSpeedPoints = 30,
+  -- Qualifying scoring, Drift Masters judging rules 2026 (1.6/1.7): line 60,
+  -- angle 20, style 20 = initiation 5 + fluidity 10 + commitment 5.
+  leadLinePoints = 60,
+  leadAnglePoints = 20,
+  leadStyleSpeedPoints = 20,
+  styleInitiationPoints = 5,
+  styleFluidityPoints = 10,
+  styleCommitmentPoints = 5,
+  -- Line: every outer zone and inner clip is worth an equal share of the
+  -- line points; staying on the drawn route ("off line") weighs this much.
+  lineOffLineWeight = 0.10,
+  -- Initiation (early, rate to angle, smooth). Early: the drift (minimum
+  -- angle) is established within initiationFullMeters past the start
+  -- exclusion, nothing after initiationZeroMeters. Rate to angle: meters from
+  -- there to initiationRateAngleShare of the target angle. Smooth: angle given
+  -- back inside the initiation window. Dropping out of the drift and
+  -- initiating again in that window is a double initiation (halves it).
+  initiationFullMeters = 12,
+  initiationZeroMeters = 40,
+  initiationWindowMeters = 20,
+  initiationRateAngleShare = 0.80,
+  initiationRateFullMeters = 4,
+  initiationRateZeroMeters = 16,
+  initiationSmoothDropRangeDeg = 30,
+  doubleInitiationFactor = 0.5,
+  -- Fluidity: settled car (few abrupt corrections) and transitions that
+  -- rotate quickly from high angle to high angle (lock to lock).
+  fluidityTransitionWeight = 0.50,
+  transitionFullMeters = 3,
+  transitionZeroMeters = 12,
+  transitionLockWindowMeters = 6,
+  -- Commitment: pace (speed against the target), keeping that pace (no big
+  -- speed drops) and consistent throttle.
+  commitmentPaceWeight = 0.50,
+  commitmentConsistencyWeight = 0.25,
+  commitmentThrottleWeight = 0.25,
+  commitmentDropRange = 0.35,
+  commitmentThrottleOn = 0.60,
+  commitmentFullThrottleShare = 0.70,
   progressBinMeters = 1,
-  outerZoneLineWeight = 0.60,
-  innerClipLineWeight = 0.30,
-  pathLineWeight = 0.10,
   pathCorridorOutsideToleranceMeters = 3,
   progressSearchBackSegments = 2,
   progressSearchForwardSegments = 8,
@@ -297,8 +349,6 @@ M.scoring = {
   transitionGraceMeters = 4,
   styleMinimumDriftAngleDeg = 15,
   styleFullDriftAngleDeg = 30,
-  speedStyleWeight = 0.65,
-  fluidityStyleWeight = 0.35,
   steeringDeadband = 8,
   throttleDeadband = 10,
   angleChangeDeadbandDeg = 4,
@@ -1257,15 +1307,16 @@ local function innerClipQuality(bins, layout, config)
   return { average = total / #items, items = items }
 end
 
-local function availableLine(pathValue, zones, clips, layout, config)
-  local weighted, weights = pathValue * config.pathLineWeight, config.pathLineWeight
-  if #layout.outerZones > 0 then
-    weighted, weights = weighted + zones * config.outerZoneLineWeight, weights + config.outerZoneLineWeight
-  end
-  if #layout.innerClips > 0 then
-    weighted, weights = weighted + clips * config.innerClipLineWeight, weights + config.innerClipLineWeight
-  end
-  return weights <= 0 and 1 or weighted / weights
+-- Line (Drift Masters 1.7): points are spread across the outer zones and
+-- inner clips, each an equal share; missing one scores 0 for it. Leaving the
+-- drawn route ("off line") takes up to lineOffLineWeight of the line.
+local function lineQuality(pathValue, zones, clips, config)
+  local total, count = 0, 0
+  for _, quality in ipairs(zones.items) do total, count = total + quality, count + 1 end
+  for _, quality in ipairs(clips.items) do total, count = total + quality, count + 1 end
+  if count == 0 then return pathValue end
+  local weight = U.clamp(config.lineOffLineWeight, 0, 1)
+  return (total / count) * (1 - weight) + pathValue * weight
 end
 
 local function angleQuality(bins, config)
@@ -1288,33 +1339,123 @@ local function normalizedCorrection(delta, deadband, range)
   return U.clamp((delta - deadband) / math.max(0.001, range), 0, 1)
 end
 
-local function weightedStyle(speed, fluidity, config)
-  local total = config.speedStyleWeight + config.fluidityStyleWeight
-  return total <= 0 and 1
-    or (speed * config.speedStyleWeight + fluidity * config.fluidityStyleWeight) / total
+local function sign(value) return value < 0 and -1 or 1 end
+
+-- Initiation (5): early (reference: the start exclusion, like the
+-- initiation cones), rate to angle (how fast the desired angle is reached)
+-- and smooth (no angle given back). A drop out of the drift and a second
+-- initiation inside the window is a double initiation.
+local function initiationQuality(bins, config)
+  local startAt
+  for index, sample in ipairs(bins) do
+    if sample.angleDeg >= config.minimumAngleDeg then startAt = index break end
+  end
+  if not startAt then return { combined = 0, early = 0, rate = 0, smooth = 0, double = false, meters = nil } end
+  local initiated = bins[startAt]
+  local meters, side = initiated.progress.meters, sign(initiated.signedAngleDeg)
+  local lateBy = meters - config.startExclusionMeters - config.initiationFullMeters
+  local early = 1 - U.clamp(lateBy / math.max(0.001, config.initiationZeroMeters - config.initiationFullMeters), 0, 1)
+
+  local rateAngle = config.targetAngleDeg * config.initiationRateAngleShare
+  local reachedAfter, drop, dropped, double = nil, 0, false, false
+  for index = startAt, #bins do
+    local sample, previous = bins[index], bins[index - 1]
+    if sample.progress.meters - meters > config.initiationWindowMeters then break end
+    if not reachedAfter and sample.angleDeg >= rateAngle then reachedAfter = sample.progress.meters - meters end
+    if sign(sample.signedAngleDeg) == side then
+      if previous and index > startAt and sign(previous.signedAngleDeg) == side then
+        drop = drop + math.max(0, previous.angleDeg - sample.angleDeg - config.angleChangeDeadbandDeg)
+      end
+      if sample.angleDeg < config.minimumAngleDeg * 0.5 then dropped = true end
+      if dropped and sample.angleDeg >= config.minimumAngleDeg then double = true end
+    end
+  end
+  local rate = reachedAfter and 1 - U.clamp((reachedAfter - config.initiationRateFullMeters)
+    / math.max(0.001, config.initiationRateZeroMeters - config.initiationRateFullMeters), 0, 1) or 0
+  local smooth = 1 - U.clamp(drop / math.max(0.001, config.initiationSmoothDropRangeDeg), 0, 1)
+  local combined = (early + rate + smooth) / 3
+  if double then combined = combined * config.doubleInitiationFactor end
+  return { combined = combined, early = early, rate = rate, smooth = smooth, double = double, meters = meters }
 end
 
-local function styleQuality(bins, config)
-  local speed = average(bins, function(sample)
+-- Transitions (fluidity): each switch from one drift direction to the other,
+-- scored on how quickly it rotates (meters spent below the minimum angle)
+-- and on going from high angle to high angle (lock to lock).
+local function transitionQuality(bins, config)
+  local items, last = {}, nil
+  for index, sample in ipairs(bins) do
+    if sample.angleDeg >= config.minimumAngleDeg then
+      if last and sign(bins[last].signedAngleDeg) ~= sign(sample.signedAngleDeg) then
+        local fromMeters, toMeters = bins[last].progress.meters, sample.progress.meters
+        local gap = toMeters - fromMeters
+        local quick = 1 - U.clamp((gap - config.transitionFullMeters)
+          / math.max(0.001, config.transitionZeroMeters - config.transitionFullMeters), 0, 1)
+        local before, after = 0, 0
+        for _, other in ipairs(bins) do
+          local at = other.progress.meters
+          if at <= fromMeters and fromMeters - at <= config.transitionLockWindowMeters then before = math.max(before, other.angleDeg) end
+          if at >= toMeters and at - toMeters <= config.transitionLockWindowMeters then after = math.max(after, other.angleDeg) end
+        end
+        local lock = U.clamp((math.min(before, after) - config.minimumAngleDeg)
+          / math.max(0.001, config.targetAngleDeg - config.minimumAngleDeg), 0, 1)
+        items[#items + 1] = (quick + lock) * 0.5
+      end
+      last = index
+    end
+  end
+  if #items == 0 then return nil end
+  return average(items, function(item) return item end)
+end
+
+-- Fluidity (10): the car settled and flowing (few abrupt steering, throttle
+-- and angle corrections), plus smooth lock-to-lock transitions where the
+-- course has them. Commitment (5): pace, keeping it (no big speed drops)
+-- and consistent throttle.
+local function styleQuality(active, course, config)
+  local pace = average(active, function(sample)
     return U.clamp(sample.speedKmh / config.targetSpeedKmh, 0, 1)
   end)
-  if #bins < 2 then return { speed = speed, fluidity = 1, combined = weightedStyle(speed, 1, config) } end
-  local fluidity = 0
-  for i = 2, #bins do
-    local steer = normalizedCorrection(
-      math.abs(bins[i].steerAngle - bins[i - 1].steerAngle),
-      config.steeringDeadband, config.steeringCorrectionRange)
-    local throttle = normalizedCorrection(
-      math.abs(bins[i].gas - bins[i - 1].gas),
-      config.throttleDeadband, config.throttleCorrectionRange)
-    local angle = normalizedCorrection(
-      math.abs(G.signedAngleDelta(bins[i - 1].signedAngleDeg, bins[i].signedAngleDeg)),
-      config.angleChangeDeadbandDeg, config.angleCorrectionRangeDeg)
-    local correction = steer * 0.40 + throttle * 0.25 + angle * 0.35
-    fluidity = fluidity + 1 - U.clamp(correction, 0, 1)
+  local settled = 1
+  if #active >= 2 then
+    settled = 0
+    for i = 2, #active do
+      local steer = normalizedCorrection(
+        math.abs(active[i].steerAngle - active[i - 1].steerAngle),
+        config.steeringDeadband, config.steeringCorrectionRange)
+      local throttle = normalizedCorrection(
+        math.abs(active[i].gas - active[i - 1].gas),
+        config.throttleDeadband, config.throttleCorrectionRange)
+      local angle = normalizedCorrection(
+        math.abs(G.signedAngleDelta(active[i - 1].signedAngleDeg, active[i].signedAngleDeg)),
+        config.angleChangeDeadbandDeg, config.angleCorrectionRangeDeg)
+      settled = settled + 1 - U.clamp(steer * 0.40 + throttle * 0.25 + angle * 0.35, 0, 1)
+    end
+    settled = settled / (#active - 1)
   end
-  fluidity = fluidity / (#bins - 1)
-  return { speed = speed, fluidity = fluidity, combined = weightedStyle(speed, fluidity, config) }
+  local transitions = transitionQuality(course, config)
+  local fluidity = transitions == nil and settled
+    or settled * (1 - config.fluidityTransitionWeight) + transitions * config.fluidityTransitionWeight
+
+  local speeds = {}
+  for _, sample in ipairs(active) do speeds[#speeds + 1] = sample.speedKmh end
+  table.sort(speeds)
+  local consistency = 1
+  if #speeds > 0 then
+    local mean = average(active, function(sample) return sample.speedKmh end)
+    local low = speeds[math.max(1, math.floor(#speeds * 0.10))]
+    consistency = 1 - U.clamp((mean - low) / math.max(1, mean) / math.max(0.001, config.commitmentDropRange), 0, 1)
+  end
+  local throttleOn = average(active, function(sample)
+    return sample.gas >= config.commitmentThrottleOn * 255 and 1 or 0
+  end)
+  local throttle = U.clamp(throttleOn / math.max(0.001, config.commitmentFullThrottleShare), 0, 1)
+  local weights = config.commitmentPaceWeight + config.commitmentConsistencyWeight + config.commitmentThrottleWeight
+  local commitment = weights <= 0 and pace or (pace * config.commitmentPaceWeight
+    + consistency * config.commitmentConsistencyWeight + throttle * config.commitmentThrottleWeight) / weights
+  return {
+    speed = pace, fluidity = fluidity, settled = settled, transitions = transitions,
+    commitment = commitment, consistency = consistency, throttle = throttle
+  }
 end
 
 local function percentageItems(items)
@@ -1326,6 +1467,8 @@ end
 function M.zero(reason)
   return {
     score = 0, line = 0, angle = 0, styleSpeed = 0, penalties = 0,
+    initiation = 0, fluidity = 0, commitment = 0, initiationQuality = 0, initiationMeters = nil,
+    doubleInitiation = false,
     averageAngle = 0, averageSpeed = 0, maxAngle = 0,
     targetAngle = 0, targetSpeed = 0, pathQuality = 0, zoneQuality = 0,
     clipQuality = 0, zoneQualities = {}, clipQualities = {},
@@ -1344,13 +1487,21 @@ function M.scoreLead(samples, layout, config, penalties, invalid, reason)
   local path = pathQuality(course, layout, config)
   local zones = outerZoneQuality(bins, layout, config)
   local clips = innerClipQuality(bins, layout, config)
-  local lineQuality = availableLine(path, zones.average, clips.average, layout, config)
+  local lineValue = lineQuality(path, zones, clips, config)
   local angleValue = angleQuality(active, config)
-  local style = styleQuality(active, config)
+  local style = styleQuality(active, course, config)
   local engaged = engagement(active, config)
-  local line = config.leadLinePoints * lineQuality
+  local start = initiationQuality(bins, config)
+  local line = config.leadLinePoints * lineValue
   local angle = config.leadAnglePoints * angleValue
-  local styleSpeed = config.leadStyleSpeedPoints * style.combined * engaged
+  -- Style splits into its three parts; fluidity and commitment only count
+  -- while actually drifting (engagement), initiation measures the drift's start.
+  local initiation = config.styleInitiationPoints * start.combined
+  local fluidity = config.styleFluidityPoints * style.fluidity * engaged
+  local commitment = config.styleCommitmentPoints * style.commitment * engaged
+  local styleParts = config.styleInitiationPoints + config.styleFluidityPoints + config.styleCommitmentPoints
+  local styleSpeed = styleParts <= 0 and 0
+    or (initiation + fluidity + commitment) * config.leadStyleSpeedPoints / styleParts
   local maxAngle = 0
   for _, sample in ipairs(bins) do maxAngle = math.max(maxAngle, sample.angleDeg) end
   return {
@@ -1358,6 +1509,12 @@ function M.scoreLead(samples, layout, config, penalties, invalid, reason)
     line = line,
     angle = angle,
     styleSpeed = styleSpeed,
+    initiation = initiation,
+    fluidity = fluidity,
+    commitment = commitment,
+    initiationQuality = start.combined * 100,
+    initiationMeters = start.meters,
+    doubleInitiation = start.double,
     penalties = penalties,
     averageAngle = average(active, function(sample) return sample.angleDeg end),
     averageSpeed = average(active, function(sample) return sample.speedKmh end),
@@ -1680,7 +1837,7 @@ local function status(state, message)
 end
 
 function M.new(context)
-  return setmetatable({
+  local session = setmetatable({
     context = context,
     state = 'idle',
     countdownRemaining = 0,
@@ -1700,8 +1857,71 @@ function M.new(context)
     lastProgressPosition = nil,
     resultAge = 99,
     message = '',
-    messageAge = 99
+    messageAge = 99,
+    deductions = {},
+    contact = nil,
+    recentSpeeds = {}
   }, M)
+  -- Walls and other cars: CSP calls this once as each contact starts.
+  if ac.onCarCollision then
+    ac.onCarCollision(0, function() session:onCollision() end)
+  end
+  return session
+end
+
+local function contactPenalty(lossKmh)
+  local flow = D.flow
+  if lossKmh >= flow.contactHardLossKmh then return flow.contactHardPenalty end
+  if lossKmh >= flow.contactMediumLossKmh then return flow.contactMediumPenalty end
+  return flow.contactLightPenalty
+end
+
+function M:onCollision()
+  if self.state ~= 'running' then return end
+  local now = U.round(self.runElapsed * 1000)
+  local car = ac.getCar(0)
+  local withCar = car ~= nil and (tonumber(car.collidedWith) or 0) ~= 0
+  if self.contact and now - self.contact.lastAt <= D.flow.contactMergeSeconds * 1000 then
+    self.contact.lastAt = now
+    self.contact.withCar = self.contact.withCar or withCar
+    return
+  end
+  self:closeContact()
+  -- Speed just before the hit: the fastest of the last few samples.
+  local before = car and tonumber(car.speedKmh) or 0
+  for _, speed in ipairs(self.recentSpeeds) do before = math.max(before, speed) end
+  self.contact = { startAt = now, lastAt = now, speedBefore = before, minSpeed = before, withCar = withCar }
+end
+
+-- Takes points off the run (Drift Masters "deductions"); the HUD flashes it.
+function M:deduct(kind, points, label, at)
+  self.penalties = self.penalties + points
+  self.deductions[#self.deductions + 1] = { kind = kind, points = points }
+  self.lastDeductionKind, self.lastDeductionPoints = kind, points
+  self.lastDeductionAt = at or U.round(self.runElapsed * 1000)
+  status(self, string.format('%s: -%d pontos.', label, points))
+end
+
+-- Settles the open contact (if any) into a deduction.
+function M:closeContact()
+  local contact = self.contact
+  if not contact then return end
+  self.contact = nil
+  local loss = math.max(0, contact.speedBefore - contact.minSpeed)
+  self:deduct('contact', contactPenalty(loss), contact.withCar and 'Toque num carro' or 'Toque no muro', contact.startAt)
+end
+
+-- Called for every sample while running: tracks how much speed the open
+-- contact costs and closes it once the measuring window has passed.
+function M:trackContact(sample)
+  table.insert(self.recentSpeeds, sample.speedKmh)
+  if #self.recentSpeeds > 5 then table.remove(self.recentSpeeds, 1) end
+  local contact = self.contact
+  if not contact then return end
+  contact.minSpeed = math.min(contact.minSpeed, sample.speedKmh)
+  if sample.timeMilliseconds - contact.lastAt >= D.flow.contactMeasureSeconds * 1000 then
+    self:closeContact()
+  end
 end
 
 function M:isBusy()
@@ -1803,10 +2023,19 @@ end
 function M:sustained(rule, condition, now, graceSeconds)
   if not condition then
     self.ruleSince[rule] = nil
+    self.ruleFired[rule] = nil
     return false
   end
   self.ruleSince[rule] = self.ruleSince[rule] or now
   return now - self.ruleSince[rule] >= graceSeconds * 1000
+end
+
+-- Like sustained(), but true only once per episode: the condition has to
+-- clear before the same rule can fire again (one deduction per mistake).
+function M:episode(rule, condition, now, graceSeconds)
+  if not self:sustained(rule, condition, now, graceSeconds) or self.ruleFired[rule] then return false end
+  self.ruleFired[rule] = true
+  return true
 end
 
 function M:beginCountdown()
@@ -1825,6 +2054,8 @@ function M:beginCountdown()
   self.state = 'countdown'
   self.countdownRemaining = D.flow.countdownSeconds
   self.samples, self.penalties, self.invalid, self.invalidReason = {}, 0, false, ''
+  self.deductions, self.contact, self.recentSpeeds, self.lastDeductionAt = {}, nil, {}, nil
+  self.ruleFired = {}
   self.previousPosition, self.spinSince = nil, nil
   self.ruleSince, self.driftEngaged = {}, false
   self:resetProgress()
@@ -1834,7 +2065,7 @@ end
 function M:beginRun()
   self.state = 'running'
   self.runElapsed, self.sampleAccumulator = 0, 0
-  self.ruleSince, self.driftEngaged, self.launched = {}, false, false
+  self.ruleSince, self.ruleFired, self.driftEngaged, self.launched = {}, {}, false, false
   self.courseLength = routeLength(self.context.layout.pathWaypoints)
   self:resetProgress()
   local first = self:sample(0)
@@ -1894,12 +2125,22 @@ function M:checkInvalid(sample)
   -- A stopped car has no slip angle either; that case is reported as a stop.
   local straight = self.driftEngaged and sample.angleDeg < flow.straightenAngleDeg
     and sample.speedKmh >= flow.stopSpeedKmh and remaining > scoring.finishExclusionMeters
-  if self:sustained('straighten', straight, now, flow.straightenGraceSeconds) then
-    self:markInvalid('Endireitou o carro')
+  -- A short straightening is a correction (deduction); staying straight is
+  -- "stop drifting" (incomplete).
+  if self:episode('straighten', straight, now, flow.straightenGraceSeconds) then
+    self:deduct('straighten', flow.straightenDeduction, 'Endireitou (correção)', now)
+  end
+  if self:sustained('stopDrifting', straight, now, flow.stopDriftingSeconds) then
+    self:markInvalid('Parou de derrapar')
   end
 
-  if self:sustained('offTrack', (sample.wheelsOutside or 0) >= flow.offTrackWheels, now, flow.offTrackGraceSeconds) then
-    self:markInvalid('Saiu da pista')
+  -- Track limits: three wheels off is incomplete, one or two a deduction.
+  local wheelsOff = sample.wheelsOutside or 0
+  if self:sustained('offTrack', wheelsOff >= flow.offTrackWheels, now, flow.offTrackGraceSeconds) then
+    self:markInvalid('Três rodas fora da pista')
+  end
+  if self:episode('tireOff', wheelsOff >= flow.tireOffWheels, now, flow.offTrackGraceSeconds) then
+    self:deduct('tireOff', flow.tireOffDeduction, 'Roda fora da pista', now)
   end
 
   -- Stopping: only after the launch, so a slow reaction at "Vai!" isn't a stop
@@ -1912,10 +2153,18 @@ end
 
 function M:finish(reason)
   local context = self.context
+  self:closeContact()
   local score = Scoring.scoreLead(
     self.samples, context.layout, context.scoring, self.penalties, self.invalid, self.invalidReason)
   score.reason = score.valid and 'Válida' or (self.invalidReason ~= '' and self.invalidReason or reason)
   score.calibration = context.calibration.active
+  -- Deductions only matter for a completed run.
+  score.deductionCount = score.valid and #self.deductions or 0
+  local contacts = 0
+  for _, deduction in ipairs(self.deductions) do
+    if deduction.kind == 'contact' then contacts = contacts + 1 end
+  end
+  score.contacts = score.valid and contacts or 0
   context.lastResult = score
   self.resultAge = 0
   if physics.allowed() then physics.disableCarCollisions(0, false, false) end
@@ -2000,6 +2249,7 @@ function M:update(dt)
       local sample = self:sample(U.round(self.runElapsed * 1000))
       if sample then
         self.samples[#self.samples + 1] = sample
+        self:trackContact(sample)
         self:checkInvalid(sample)
         if self.invalid then self:finish(self.invalidReason) return end
         if self.previousPosition and G.crossedGate(
@@ -2720,7 +2970,7 @@ end
 -- Panel heights per state. The HUD only carries what a driver reads at a
 -- glance: the count, angle and speed while driving, and the score (or why
 -- the run was voided) at the end.
-local hudHeights = { countdown = 76, running = 72, result = 100, idle = 92 }
+local hudHeights = { countdown = 76, running = 72, result = 100, idle = 106 }
 
 function M.hudSize(context)
   local state = context.session.state
@@ -2777,11 +3027,13 @@ local function guide(context, p1)
 
   -- Rules that void a run.
   fill(vec2(p1.x + 20, p1.y + 40), vec2(p2.x - 16, p1.y + 41), rgbm(1, 1, 1, 0.08), 0)
-  textIn('A RUN É INVÁLIDA SE', 9, p1 + vec2(20, 44), vec2(p2.x - 16, p1.y + 56), 'Start', 'Center', BRAND.muted, 'mono')
-  textIn('Arrancar antes · Contramão · Endireitar', 10,
+  textIn('A RUN É INCOMPLETA SE', 9, p1 + vec2(20, 44), vec2(p2.x - 16, p1.y + 56), 'Start', 'Center', BRAND.muted, 'mono')
+  textIn('Arrancar antes · Contramão · Trompo', 10,
     p1 + vec2(20, 57), vec2(p2.x - 12, p1.y + 71), 'Start', 'Center', BRAND.text, 'mono')
-  textIn('Sair da pista · Parar · Trompo', 10,
+  textIn('3 rodas fora · Parar · Deixar de derrapar', 10,
     p1 + vec2(20, 71), vec2(p2.x - 12, p1.y + 85), 'Start', 'Center', BRAND.text, 'mono')
+  textIn('Toques, rodas fora e correções descontam', 9,
+    p1 + vec2(20, 86), vec2(p2.x - 12, p1.y + 98), 'Start', 'Center', BRAND.muted, 'mono')
 end
 
 function M.hud(context, windowMode)
@@ -2826,7 +3078,15 @@ function M.hud(context, windowMode)
       textIn(string.format('%.0f°', sample.angleDeg), 38, p1 + vec2(20, 4), p1 + vec2(118, 52), 'Start', 'Center', BRAND.text, 'number')
       textIn('ÂNGULO', 10, p1 + vec2(21, 48), p1 + vec2(118, 62), 'Start', 'Center', BRAND.muted, 'mono')
       textIn(string.format('%.0f', sample.speedKmh), 26, p1 + vec2(128, 12), p1 + vec2(210, 48), 'Start', 'Center', BRAND.text, 'number')
-      textIn('KM/H', 10, p1 + vec2(129, 48), p1 + vec2(210, 62), 'Start', 'Center', BRAND.muted, 'mono')
+      -- A deduction (contact, tire off, correction) flashes where the speed label sits.
+      local sinceDeduction = session.lastDeductionAt and (session.runElapsed * 1000 - session.lastDeductionAt) or math.huge
+      if sinceDeduction < 1500 then
+        local labels = { contact = 'TOQUE', tireOff = 'RODA FORA', straighten = 'CORREÇÃO' }
+        textIn(string.format('%s -%d', labels[session.lastDeductionKind] or 'DEDUÇÃO', session.lastDeductionPoints or 0), 10,
+          p1 + vec2(129, 48), p1 + vec2(214, 62), 'Start', 'Center', BRAND.accent2, 'monoBold')
+      else
+        textIn('KM/H', 10, p1 + vec2(129, 48), p1 + vec2(210, 62), 'Start', 'Center', BRAND.muted, 'mono')
+      end
       angleGauge(vec2(p2.x - 44, p1.y + 34), 24, sample.angleDeg, 90,
         context.scoring.targetAngleDeg, rgbm(1, 1, 1, 0.12))
       -- Course progress along the bottom edge.
@@ -2842,7 +3102,7 @@ function M.hud(context, windowMode)
       fill(p1, p2, withAlpha(BRAND.accent, (1 - phase) * 0.18), 4)
       speedBurst(vec2(p1.x + 52, p1.y + 60), phase, BRAND.accent)
     end
-    textIn(result.personalBest and 'NOVO RECORDE' or (result.valid and 'RESULTADO' or 'RUN INVÁLIDA'),
+    textIn(result.personalBest and 'NOVO RECORDE' or (result.valid and 'RESULTADO' or 'RUN INCOMPLETA'),
       13, p1 + vec2(20, 6), p1 + vec2(220, 26), 'Start', 'Center', accent, 'title')
     textIn(string.format('%.0f', result.score or 0), 52, p1 + vec2(18, 26), p1 + vec2(130, 86), 'Start', 'Center', BRAND.text, 'number')
     textIn('PTS', 10, p1 + vec2(20, 82), p1 + vec2(80, 96), 'Start', 'Center', BRAND.muted, 'mono')
@@ -2850,15 +3110,22 @@ function M.hud(context, windowMode)
       -- Breakdown: name left, points / max right.
       local scoring = context.scoring or {}
       local rows = {
-        { 'LINHA', result.line, scoring.leadLinePoints or 35 },
-        { 'ÂNGULO', result.angle, scoring.leadAnglePoints or 35 },
-        { 'ESTILO', result.styleSpeed, scoring.leadStyleSpeedPoints or 30 },
+        { 'LINHA', string.format('%.0f/%d', result.line or 0, scoring.leadLinePoints or 35) },
+        { 'ÂNGULO', string.format('%.0f/%d', result.angle or 0, scoring.leadAnglePoints or 35) },
+        { 'ESTILO', string.format('%.0f/%d', result.styleSpeed or 0, scoring.leadStyleSpeedPoints or 30) },
       }
+      -- Wall and car contacts get a fourth row, so the rows close up a little.
+      local penalties = tonumber(result.penalties) or 0
+      if penalties > 0 then
+        local count = tonumber(result.deductionCount) or tonumber(result.contacts) or 0
+        rows[#rows + 1] = { count == 1 and '1 DEDUÇÃO' or string.format('%d DEDUÇÕES', count),
+          string.format('-%.0f', penalties), BRAND.accent2 }
+      end
+      local first, step = #rows > 3 and 24 or 30, #rows > 3 and 18 or 20
       for index, row in ipairs(rows) do
-        local top = p1.y + 30 + (index - 1) * 20
-        textIn(row[1], 11, vec2(p1.x + 150, top), vec2(p1.x + 214, top + 18), 'Start', 'Center', BRAND.muted, 'title')
-        textIn(string.format('%.0f/%d', row[2] or 0, row[3]), 12,
-          vec2(p1.x + 210, top), vec2(p2.x - 16, top + 18), 'End', 'Center', BRAND.text, 'monoBold')
+        local top = p1.y + first + (index - 1) * step
+        textIn(row[1], 11, vec2(p1.x + 150, top), vec2(p2.x - 46, top + 18), 'Start', 'Center', row[3] or BRAND.muted, 'title')
+        textIn(row[2], 12, vec2(p1.x + 210, top), vec2(p2.x - 16, top + 18), 'End', 'Center', row[3] or BRAND.text, 'monoBold')
       end
     else
       -- Voided: the reason is what the driver needs.
@@ -3063,13 +3330,26 @@ local function runTab(context)
   muted('Partilhada entre jogadores, não validada pelo servidor.')
 
   ui.newLine()
-  heading('A Run Fica Inválida Se')
+  heading('Pontuação (Drift Masters 2026)')
+  ui.bulletText('Linha 60: zonas exteriores e clips, cada um vale o mesmo')
+  ui.bulletText('Ângulo 20: ângulo alto e mantido nas zonas julgadas')
+  ui.bulletText('Estilo 20: iniciação 5 · fluidez 10 · compromisso 5')
+
+  ui.newLine()
+  heading('Deduções')
+  ui.bulletText('Toque num muro ou carro: -2 · -5 (perdes 5 km/h) · -10 (15 km/h)')
+  ui.bulletText('Roda fora da pista (1 ou 2 rodas): -2')
+  ui.bulletText('Endireitar por instantes (correção): -3')
+  ui.bulletText('Dupla iniciação: metade dos pontos de iniciação')
+  muted('Zonas e clips falhados, fora da linha e falta de ângulo saem da própria pontuação.')
+
+  ui.newLine()
+  heading('A Run Fica Incompleta Se')
   ui.bulletText('Arrancares antes do fim da contagem')
-  ui.bulletText('Andares no sentido contrário do percurso')
-  ui.bulletText('Endireitares o carro (ângulo zero) depois de começar o drift')
-  ui.bulletText('Saíres da pista com as quatro rodas')
-  ui.bulletText('Parares o carro')
   ui.bulletText('Fizeres um trompo')
+  ui.bulletText('Deixares de derrapar (1,5 s direito)')
+  ui.bulletText('Saíres com três rodas da pista')
+  ui.bulletText('Andares no sentido contrário ou parares o carro')
 
   ui.newLine()
   heading('Recorde Pessoal')
@@ -3079,7 +3359,7 @@ local function runTab(context)
     muted(U.formatDate(best.dateUtc))
     scoreLine('Linha', best.line)
     scoreLine('Ângulo', best.angle)
-    scoreLine('Estilo / velocidade', best.styleSpeed)
+    scoreLine('Estilo', best.styleSpeed)
   else
     muted('Ainda sem recorde pessoal válido.')
   end
@@ -3373,7 +3653,7 @@ local function resultsTab(context)
       ui.text('Motivo: ' .. tostring(run.reason))
       scoreLine('Linha', run.line)
       scoreLine('Ângulo', run.angle)
-      scoreLine('Estilo / velocidade', run.styleSpeed)
+      scoreLine('Estilo', run.styleSpeed)
       scoreLine('Ângulo médio', run.averageAngle)
       scoreLine('Velocidade média', run.averageSpeed)
       scoreLine('Qualidade da rota', run.pathQuality)
@@ -3396,7 +3676,7 @@ function M.window(context)
 
   ui.textColored('Drift Factory Judge App', rgbm(0.25, 0.8, 1, 1))
   sameLine()
-  muted('v0.2.0')
+  muted('v0.3.0')
   if isAdmin then
     sameLine()
     ui.textColored('ADMIN', BRAND.accent)

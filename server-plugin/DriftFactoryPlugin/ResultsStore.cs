@@ -13,6 +13,9 @@ public class BestEntry
     public float Angle { get; set; }
     public float StyleSpeed { get; set; }
     public DateTime TimeUtc { get; set; }
+
+    /// <summary>Second-best valid score that week: the Drift Masters tie breaker after the best run.</summary>
+    public float SecondScore { get; set; }
 }
 
 public class StoreState
@@ -133,13 +136,18 @@ public class ResultsStore
             var previousLeader = Ranked(board).FirstOrDefault();
             if (board.TryGetValue(driverKey, out var existing) && existing.Score >= run.Score)
             {
+                if (run.Score > existing.SecondScore)
+                {
+                    existing.SecondScore = run.Score;
+                    Save();
+                }
                 return new RecordOutcome(false, 0, false, week);
             }
 
             board[driverKey] = new BestEntry
             {
                 Driver = driver, Car = car, Score = run.Score, Line = run.Line, Angle = run.Angle,
-                StyleSpeed = run.StyleSpeed, TimeUtc = now
+                StyleSpeed = run.StyleSpeed, TimeUtc = now, SecondScore = existing?.Score ?? 0
             };
             Save();
 
@@ -166,8 +174,20 @@ public class ResultsStore
         lock (_lock) return read(State);
     }
 
+    /// <summary>
+    /// Best first. Ties follow the Drift Masters qualifying tie breaker (1.8):
+    /// best score, second-best score, then the best run's line, angle and
+    /// style; still tied, whoever set it first.
+    /// </summary>
     public static List<BestEntry> Ranked(Dictionary<string, BestEntry> board) =>
-        board.Values.OrderByDescending(entry => entry.Score).ThenBy(entry => entry.TimeUtc).ToList();
+        board.Values
+            .OrderByDescending(entry => entry.Score)
+            .ThenByDescending(entry => entry.SecondScore)
+            .ThenByDescending(entry => entry.Line)
+            .ThenByDescending(entry => entry.Angle)
+            .ThenByDescending(entry => entry.StyleSpeed)
+            .ThenBy(entry => entry.TimeUtc)
+            .ToList();
 
     public void Save()
     {

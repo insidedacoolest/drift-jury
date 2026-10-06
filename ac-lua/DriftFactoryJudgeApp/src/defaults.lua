@@ -13,28 +13,80 @@ M.flow = {
   -- Driving against the course direction (velocity pointing back along the route).
   wrongWayMinSpeedKmh = 5,
   wrongWayGraceSeconds = 0.5,
-  -- Straightening up: drift angle below this after the drift has started
-  -- (angle reached the minimum angle once), outside the finish exclusion.
-  -- The grace time lets a quick left/right transition pass through zero.
+  -- Straightening up (Drift Masters judging rules 2026, 1.7): once the drift
+  -- has started, the angle dropping below straightenAngleDeg for a moment is
+  -- a "short straightening (correction)" deduction; staying straight for
+  -- stopDriftingSeconds is "stop drifting", an incomplete run. Neither counts
+  -- in the last meters before the finish. The short grace lets a quick
+  -- left/right transition pass through zero.
   straightenAngleDeg = 5,
-  straightenGraceSeconds = 0.75,
-  -- Leaving the track: this many wheels outside the track's valid surface.
-  offTrackWheels = 4,
+  straightenGraceSeconds = 0.4,
+  stopDriftingSeconds = 1.5,
+  straightenDeduction = 3,
+  -- Track limits: one or two wheels off is "tire off course" (deduction),
+  -- three wheels off the marked track is an incomplete run.
+  offTrackWheels = 3,
   offTrackGraceSeconds = 0.25,
+  tireOffWheels = 1,
+  tireOffDeduction = 2,
   -- Stopping: speed below this, once the car has launched (passed launchedSpeedKmh).
   launchedSpeedKmh = 15,
   stopSpeedKmh = 5,
-  stopGraceSeconds = 1.0
+  stopGraceSeconds = 1.0,
+  -- Contact with a wall or another car never voids the run; each one takes
+  -- points off, more for a harder hit. Hardness is the speed lost in the
+  -- moments after the contact starts. Contacts within contactMergeSeconds
+  -- of each other (a scrape along a wall) count once.
+  contactMergeSeconds = 0.5,
+  contactMeasureSeconds = 0.4,
+  contactMediumLossKmh = 5,
+  contactHardLossKmh = 15,
+  contactLightPenalty = 2,
+  contactMediumPenalty = 5,
+  contactHardPenalty = 10
 }
 
 M.scoring = {
-  leadLinePoints = 35,
-  leadAnglePoints = 35,
-  leadStyleSpeedPoints = 30,
+  -- Qualifying scoring, Drift Masters judging rules 2026 (1.6/1.7): line 60,
+  -- angle 20, style 20 = initiation 5 + fluidity 10 + commitment 5.
+  leadLinePoints = 60,
+  leadAnglePoints = 20,
+  leadStyleSpeedPoints = 20,
+  styleInitiationPoints = 5,
+  styleFluidityPoints = 10,
+  styleCommitmentPoints = 5,
+  -- Line: every outer zone and inner clip is worth an equal share of the
+  -- line points; staying on the drawn route ("off line") weighs this much.
+  lineOffLineWeight = 0.10,
+  -- Initiation (early, rate to angle, smooth). Early: the drift (minimum
+  -- angle) is established within initiationFullMeters past the start
+  -- exclusion, nothing after initiationZeroMeters. Rate to angle: meters from
+  -- there to initiationRateAngleShare of the target angle. Smooth: angle given
+  -- back inside the initiation window. Dropping out of the drift and
+  -- initiating again in that window is a double initiation (halves it).
+  initiationFullMeters = 12,
+  initiationZeroMeters = 40,
+  initiationWindowMeters = 20,
+  initiationRateAngleShare = 0.80,
+  initiationRateFullMeters = 4,
+  initiationRateZeroMeters = 16,
+  initiationSmoothDropRangeDeg = 30,
+  doubleInitiationFactor = 0.5,
+  -- Fluidity: settled car (few abrupt corrections) and transitions that
+  -- rotate quickly from high angle to high angle (lock to lock).
+  fluidityTransitionWeight = 0.50,
+  transitionFullMeters = 3,
+  transitionZeroMeters = 12,
+  transitionLockWindowMeters = 6,
+  -- Commitment: pace (speed against the target), keeping that pace (no big
+  -- speed drops) and consistent throttle.
+  commitmentPaceWeight = 0.50,
+  commitmentConsistencyWeight = 0.25,
+  commitmentThrottleWeight = 0.25,
+  commitmentDropRange = 0.35,
+  commitmentThrottleOn = 0.60,
+  commitmentFullThrottleShare = 0.70,
   progressBinMeters = 1,
-  outerZoneLineWeight = 0.60,
-  innerClipLineWeight = 0.30,
-  pathLineWeight = 0.10,
   pathCorridorOutsideToleranceMeters = 3,
   progressSearchBackSegments = 2,
   progressSearchForwardSegments = 8,
@@ -58,8 +110,6 @@ M.scoring = {
   transitionGraceMeters = 4,
   styleMinimumDriftAngleDeg = 15,
   styleFullDriftAngleDeg = 30,
-  speedStyleWeight = 0.65,
-  fluidityStyleWeight = 0.35,
   steeringDeadband = 8,
   throttleDeadband = 10,
   angleChangeDeadbandDeg = 4,
