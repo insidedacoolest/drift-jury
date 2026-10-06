@@ -162,6 +162,26 @@ function M.getProgress(path, point, firstSegment, lastSegment)
   }
 end
 
+-- The part of the route between two progress values (meters along it).
+function M.pathSlice(path, fromMeters, toMeters)
+  local result, traversed = {}, 0
+  for i = 1, #path - 1 do
+    local a, b = path[i], path[i + 1]
+    local length = M.distance2(a, b)
+    if length > 0.0001 then
+      local startAt, endAt = traversed, traversed + length
+      if endAt >= fromMeters and startAt <= toMeters then
+        local t0 = U.clamp((fromMeters - startAt) / length, 0, 1)
+        local t1 = U.clamp((toMeters - startAt) / length, 0, 1)
+        if #result == 0 then result[1] = addScaled(a, sub(b, a), t0) end
+        result[#result + 1] = addScaled(a, sub(b, a), t1)
+      end
+      traversed = endAt
+    end
+  end
+  return result
+end
+
 function M.createOffsetPath(path, offsetMeters, maxMiterMultiplier)
   if #path < 2 or math.abs(offsetMeters) <= 0.0001 then return U.copy(path) end
   maxMiterMultiplier = maxMiterMultiplier or 2

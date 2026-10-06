@@ -49,6 +49,10 @@ Original DriftJudging SP: https://www.patreon.com/DeadEndReece/posts/driftjudges
   lost), one or two wheels off (−5) and short straightening (−5).
   Incomplete runs follow the same rules: spin, stop drifting (1 s
   straight), three wheels off.
+- Accel/decel map (Drift Masters 1.7): layouts can paint green, orange and
+  red sections of the route in a new editor tool. Accuracy to the map is
+  30% of fluidity, and a heavy footbrake or handbrake in green is −5. Drawn
+  on track and along the HUD's progress bar.
 - (Further changes get listed here as they're made.)
 
 ## Known limitation carried over from this fork

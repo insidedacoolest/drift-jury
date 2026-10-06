@@ -40,6 +40,8 @@ function M.new(context)
     startRadius = D.editor.startRadiusMeters,
     finishWidth = D.editor.finishWidthMeters,
     clipRadius = D.editor.clipRadiusMeters,
+    speedKind = 'green',
+    speedDraft = nil,
     debug = false
   }, M)
 end
@@ -157,6 +159,65 @@ end
 function M:cancelOuter()
   self.outerDraft = {}
   self.context.status = 'Rascunho da zona exterior cancelado.'
+end
+
+M.speedKindNames = { green = 'Verde', orange = 'Laranja', red = 'Vermelha' }
+
+-- Accel/decel map: a zone runs along the route from one point to another.
+-- The first point waits in speedDraft until the second one closes the zone.
+function M:addSpeedPoint(position)
+  if not self.speedDraft then
+    self.speedDraft = U.copy(position)
+    self.context.status = 'Início da zona ' .. M.speedKindNames[self.speedKind]:lower() .. ' marcado. Marca agora o fim.'
+    return
+  end
+  self:pushUndo()
+  local zones = self.context.layout.speedZones
+  zones[#zones + 1] = { kind = self.speedKind, from = self.speedDraft, to = U.copy(position) }
+  self.speedDraft = nil
+  self:changed('Zona ' .. M.speedKindNames[self.speedKind]:lower() .. ' adicionada.')
+end
+
+function M:markSpeedPointAtCar()
+  local position = cloneCarPose()
+  if position then self:addSpeedPoint(position) end
+end
+
+function M:cancelSpeedDraft()
+  self.speedDraft = nil
+  self.context.status = 'Rascunho da zona cancelado.'
+end
+
+function M:clearSpeedZones()
+  if #self.context.layout.speedZones == 0 then return end
+  self:pushUndo()
+  self.context.layout.speedZones = {}
+  self:changed('Mapa de aceleração limpo.')
+end
+
+-- The endpoint (zone index and 'from'/'to') nearest to a point.
+function M:nearestSpeedPoint(point, radius)
+  local best, bestDistance = nil, radius * radius
+  for index, zone in ipairs(self.context.layout.speedZones) do
+    for _, side in ipairs({ 'from', 'to' }) do
+      local distance = distanceSquared(point, zone[side])
+      if distance <= bestDistance then best, bestDistance = { zone = index, side = side }, distance end
+    end
+  end
+  return best
+end
+
+-- The zone covering the route where a point is (clicked inside the corridor).
+function M:speedZoneAt(point)
+  local layout = self.context.layout
+  local progress = G.getProgress(layout.pathWaypoints, point)
+  if progress.distanceToPathMeters > layout.pathCorridorHalfWidthMeters + 2 then return nil end
+  for index, zone in ipairs(layout.speedZones) do
+    local a = G.getProgress(layout.pathWaypoints, zone.from).meters
+    local b = G.getProgress(layout.pathWaypoints, zone.to).meters
+    if progress.meters >= math.min(a, b) and progress.meters <= math.max(a, b) then return index end
+  end
+  return nil
 end
 
 function M:updateRecording()
@@ -323,6 +384,8 @@ function M:update3D()
       self.outerDraft[self.dragging.index] = U.copy(hit)
     elseif self.dragging.kind == 'outer' then
       self.context.layout.outerZones[self.dragging.zone].points[self.dragging.index] = U.copy(hit)
+    elseif self.dragging.kind == 'speed' then
+      self.context.layout.speedZones[self.dragging.zone][self.dragging.side] = U.copy(hit)
     end
     self.context.dirty = true
   end
@@ -373,6 +436,16 @@ function M:update3D()
             or { kind = 'outer', zone = target.zone, index = target.index }
         end
       end
+    elseif self.mode == 'speed' then
+      if ctrl then
+        self:addSpeedPoint(hit)
+      else
+        local target = self:nearestSpeedPoint(hit, 1)
+        if target then
+          self:pushUndo()
+          self.dragging = { kind = 'speed', zone = target.zone, side = target.side }
+        end
+      end
     elseif self.mode == 'clip' and ctrl then
       self:pushUndo()
       self.context.layout.innerClips[#self.context.layout.innerClips + 1] = {
@@ -405,6 +478,17 @@ function M:update3D()
             table.remove(points, target.index)
             self:changed('Ponto da zona exterior removido.')
           end
+        end
+      end
+    elseif self.mode == 'speed' then
+      if self.speedDraft then
+        self:cancelSpeedDraft()
+      else
+        local index = self:speedZoneAt(hit)
+        if index then
+          self:pushUndo()
+          table.remove(self.context.layout.speedZones, index)
+          self:changed('Zona do mapa de aceleração removida.')
         end
       end
     elseif self.mode == 'clip' then

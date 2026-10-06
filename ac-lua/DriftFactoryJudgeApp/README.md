@@ -97,15 +97,34 @@ up to 100 points:
     angle) and smooth (no angle given back). A double initiation scores 0.
   - **Fluidity 10**: car settled (few abrupt steering, throttle and angle
     corrections) and, where the course has them, quick lock-to-lock
-    transitions (high angle to high angle).
+    transitions (high angle to high angle). On a layout with an
+    accel/decel map, accuracy to the map is 30% of fluidity (see below).
   - **Commitment 5**: pace (full at 90 km/h), keeping it (no big speed
     drops) and consistent throttle.
   Fluidity and commitment only count while actually drifting (15°→30°).
 
 **Deductions**: a wall or car contact −5, −10 (lost 5 km/h or more) or −20
 (lost 15 km/h or more); one or two wheels off track −5; a short
-straightening (correction, angle under 5° for 0.3 s) −5. A scrape or a
-continuous mistake counts once. Deductions never void a run.
+straightening (correction, angle under 5° for 0.3 s) −5; a heavy
+footbrake or handbrake (half or more, for 0.15 s) in a green zone −5. A
+scrape or a continuous mistake counts once. Deductions never void a run.
+
+**Accel/decel map** (Drift Masters 1.7, accuracy to the map): the layout
+can paint sections of the route green, orange or red.
+
+- **Green**: accelerate or at least keep the speed — throttle at 30% or more,
+  no more than 3 km/h lost from the zone's entry speed, no heavy footbrake or
+  handbrake.
+- **Orange**: partial throttle or a small speed adjustment (up to 12 km/h
+  lost), no heavy footbrake or handbrake.
+- **Red**: free to slow down with the footbrake, handbrake or off throttle;
+  not judged.
+
+Each green and orange zone is an equal share of the map accuracy (the share
+of the zone driven the way its colour asks). The zones are drawn on track
+with "Mostrar zonas, clips e mapa de aceleração", and the HUD shows the
+colours along the progress bar and the current zone's word under the speed.
+A layout without a map scores as before.
 
 **Incomplete run** (0 points): spinning out, stop drifting (straight for
 1 s), three wheels off track, plus a jump start, driving the wrong way,
@@ -114,8 +133,8 @@ stopping, no progress for 4 s or going over 90 s.
 **Ties** on the server leaderboard follow the Drift Masters tie breaker:
 best score, second-best score, then the best run's line, angle and style.
 
-Not judged in-game: the accel/decel map, opposite drift per section, hood
-or doors opening, and "unchaseable" runs.
+Not judged in-game: opposite drift per section, hood or doors opening, and
+"unchaseable" runs.
 
 ## Editor Controls
 
@@ -124,6 +143,10 @@ or doors opening, and "unchaseable" runs.
 - Outer-zone tool: `Ctrl`+click to add draft points or insert on an existing
   edge, drag points to move, and right-click to remove.
 - Clip tool: `Ctrl`+click to place and right-click to remove.
+- Accel/decel map tool: pick green, orange or red, then `Ctrl`+click the
+  start and the end of the zone (or drive and press "Início/Fim da Zona no
+  Carro"); drag an end to move it, right-click inside a zone to remove it,
+  right-click with a start marked to cancel it.
 - Editor visibility can hide committed outer zones and inner clips from the
   local editor view and selection tools without changing scoring or saved data.
 - All geometry updates locally in the same frame. Disk writes only occur when

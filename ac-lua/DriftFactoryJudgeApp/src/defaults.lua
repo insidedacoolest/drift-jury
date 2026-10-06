@@ -43,7 +43,11 @@ M.flow = {
   contactHardLossKmh = 15,
   contactLightPenalty = 5,
   contactMediumPenalty = 10,
-  contactHardPenalty = 20
+  contactHardPenalty = 20,
+  -- Accel/decel map: heavy footbrake or handbrake inside a green zone takes
+  -- points off once per episode (thresholds in M.scoring, mapHeavy*).
+  greenBrakeGraceSeconds = 0.15,
+  greenBrakeDeduction = 5
 }
 
 M.scoring = {
@@ -86,6 +90,17 @@ M.scoring = {
   commitmentDropRange = 0.35,
   commitmentThrottleOn = 0.60,
   commitmentFullThrottleShare = 0.70,
+  -- Accuracy to the accel/decel map (Drift Masters 1.7, part of fluidity),
+  -- only on layouts that have green or orange zones. Green: keep or gain
+  -- speed with the throttle on. Orange: partial throttle or a small speed
+  -- adjustment. Neither allows a heavy footbrake or handbrake. Red: free to
+  -- slow down, not judged.
+  fluidityMapWeight = 0.30,
+  mapGreenSpeedToleranceKmh = 3,
+  mapGreenMinThrottle = 0.30,
+  mapOrangeMaxDropKmh = 12,
+  mapHeavyBrake = 0.50,
+  mapHeavyHandbrake = 0.50,
   progressBinMeters = 1,
   pathCorridorOutsideToleranceMeters = 3,
   progressSearchBackSegments = 2,
@@ -140,7 +155,8 @@ function M.newLayout(track, layout)
     finishGate = nil,
     pathWaypoints = {},
     outerZones = {},
-    innerClips = {}
+    innerClips = {},
+    speedZones = {}
   }
 end
 

@@ -282,7 +282,11 @@ M.flow = {
   contactHardLossKmh = 15,
   contactLightPenalty = 5,
   contactMediumPenalty = 10,
-  contactHardPenalty = 20
+  contactHardPenalty = 20,
+  -- Accel/decel map: heavy footbrake or handbrake inside a green zone takes
+  -- points off once per episode (thresholds in M.scoring, mapHeavy*).
+  greenBrakeGraceSeconds = 0.15,
+  greenBrakeDeduction = 5
 }
 
 M.scoring = {
@@ -325,6 +329,17 @@ M.scoring = {
   commitmentDropRange = 0.35,
   commitmentThrottleOn = 0.60,
   commitmentFullThrottleShare = 0.70,
+  -- Accuracy to the accel/decel map (Drift Masters 1.7, part of fluidity),
+  -- only on layouts that have green or orange zones. Green: keep or gain
+  -- speed with the throttle on. Orange: partial throttle or a small speed
+  -- adjustment. Neither allows a heavy footbrake or handbrake. Red: free to
+  -- slow down, not judged.
+  fluidityMapWeight = 0.30,
+  mapGreenSpeedToleranceKmh = 3,
+  mapGreenMinThrottle = 0.30,
+  mapOrangeMaxDropKmh = 12,
+  mapHeavyBrake = 0.50,
+  mapHeavyHandbrake = 0.50,
   progressBinMeters = 1,
   pathCorridorOutsideToleranceMeters = 3,
   progressSearchBackSegments = 2,
@@ -379,7 +394,8 @@ function M.newLayout(track, layout)
     finishGate = nil,
     pathWaypoints = {},
     outerZones = {},
-    innerClips = {}
+    innerClips = {},
+    speedZones = {}
   }
 end
 
@@ -550,6 +566,26 @@ function M.getProgress(path, point, firstSegment, lastSegment)
     normalized = traversed <= 0 and 0 or U.clamp(bestAlong / traversed, 0, 1),
     segmentIndex = bestSegment
   }
+end
+
+-- The part of the route between two progress values (meters along it).
+function M.pathSlice(path, fromMeters, toMeters)
+  local result, traversed = {}, 0
+  for i = 1, #path - 1 do
+    local a, b = path[i], path[i + 1]
+    local length = M.distance2(a, b)
+    if length > 0.0001 then
+      local startAt, endAt = traversed, traversed + length
+      if endAt >= fromMeters and startAt <= toMeters then
+        local t0 = U.clamp((fromMeters - startAt) / length, 0, 1)
+        local t1 = U.clamp((toMeters - startAt) / length, 0, 1)
+        if #result == 0 then result[1] = addScaled(a, sub(b, a), t0) end
+        result[#result + 1] = addScaled(a, sub(b, a), t1)
+      end
+      traversed = endAt
+    end
+  end
+  return result
 end
 
 function M.createOffsetPath(path, offsetMeters, maxMiterMultiplier)
@@ -765,6 +801,8 @@ local D = require('src.defaults')
 local P = require('src.profiles')
 local M = {}
 
+M.speedZoneKinds = { green = true, orange = true, red = true }
+
 local function normalizeStart(value)
   if type(value) ~= 'table' then return nil end
   value.position = U.vec(value.position)
@@ -913,6 +951,15 @@ function M.normalizeLayout(layout, track, layoutID)
     clip.position = U.vec(clip.position)
     clip.radiusMeters = tonumber(clip.radiusMeters) or D.editor.clipRadiusMeters
   end
+  -- Accel/decel map: sections of the route between two points, each green,
+  -- orange or red. Unknown colours are dropped.
+  local speedZones = {}
+  for _, zone in ipairs(U.ensureArray(layout.speedZones)) do
+    if type(zone) == 'table' and M.speedZoneKinds[zone.kind] and zone.from and zone.to then
+      speedZones[#speedZones + 1] = { kind = zone.kind, from = U.vec(zone.from), to = U.vec(zone.to) }
+    end
+  end
+  layout.speedZones = speedZones
   layout.lineupPairs = U.ensureArray(layout.lineupPairs)
   normalizeProfiles(layout)
   return layout
@@ -953,7 +1000,8 @@ function M.toStorageLayout(layout)
     finishGate = copyGate(layout.finishGate),
     pathWaypoints = U.copy(layout.pathWaypoints),
     outerZones = U.copy(layout.outerZones),
-    innerClips = U.copy(layout.innerClips)
+    innerClips = U.copy(layout.innerClips),
+    speedZones = U.copy(layout.speedZones)
   }
   return result
 end
@@ -1039,6 +1087,8 @@ local function interpolate(a, b, t, targetProgress, pathLength, layout)
     velocity = interpolateVector(a.velocity, b.velocity, t),
     steerAngle = U.round(U.clamp(U.lerp(a.steerAngle, b.steerAngle, t), 0, 255)),
     gas = U.round(U.clamp(U.lerp(a.gas, b.gas, t), 0, 255)),
+    brake = U.round(U.clamp(U.lerp(a.brake or 0, b.brake or 0, t), 0, 255)),
+    handbrake = U.round(U.clamp(U.lerp(a.handbrake or 0, b.handbrake or 0, t), 0, 255)),
     signedAngleDeg = signedAngle,
     angleDeg = math.abs(signedAngle),
     speedKmh = U.lerp(a.speedKmh, b.speedKmh, t),
@@ -1319,6 +1369,63 @@ local function lineQuality(pathValue, zones, clips, config)
   return (total / count) * (1 - weight) + pathValue * weight
 end
 
+-- Accel/decel map: each zone as a stretch of the route, in meters along it.
+function M.speedZoneRanges(layout)
+  local ranges = {}
+  for _, zone in ipairs(layout.speedZones or {}) do
+    local a = G.getProgress(layout.pathWaypoints, zone.from).meters
+    local b = G.getProgress(layout.pathWaypoints, zone.to).meters
+    ranges[#ranges + 1] = { kind = zone.kind, fromMeters = math.min(a, b), toMeters = math.max(a, b) }
+  end
+  return ranges
+end
+
+-- The colour of the map at a point of the route ('green', 'orange', 'red' or nil).
+function M.speedZoneAt(ranges, meters)
+  for _, range in ipairs(ranges or {}) do
+    if meters >= range.fromMeters and meters <= range.toMeters then return range.kind end
+  end
+  return nil
+end
+
+function M.heavyBraking(sample, config)
+  return (sample.brake or 0) >= config.mapHeavyBrake * 255
+    or (sample.handbrake or 0) >= config.mapHeavyHandbrake * 255
+end
+
+-- Accuracy to the accel/decel map (Drift Masters 1.7, fluidity): the share
+-- of each green and orange zone driven the way its colour asks, every zone
+-- an equal share. Green: no heavy brakes, throttle on and no speed lost
+-- (beyond a small tolerance) from the zone's entry. Orange: no heavy brakes
+-- and only a small speed adjustment. Red zones aren't judged. nil when the
+-- layout has no green or orange zone.
+local function mapAccuracy(bins, ranges, config)
+  local items = {}
+  for _, range in ipairs(ranges) do
+    if range.kind == 'green' or range.kind == 'orange' then
+      local entry, total, good = nil, 0, 0
+      for _, sample in ipairs(bins) do
+        local at = sample.progress.meters
+        if at >= range.fromMeters and at <= range.toMeters then
+          entry = entry or sample.speedKmh
+          total = total + 1
+          local ok = not M.heavyBraking(sample, config)
+          if range.kind == 'green' then
+            ok = ok and (sample.gas or 0) >= config.mapGreenMinThrottle * 255
+              and sample.speedKmh >= entry - config.mapGreenSpeedToleranceKmh
+          else
+            ok = ok and sample.speedKmh >= entry - config.mapOrangeMaxDropKmh
+          end
+          if ok then good = good + 1 end
+        end
+      end
+      items[#items + 1] = total > 0 and good / total or 0
+    end
+  end
+  if #items == 0 then return nil end
+  return { average = average(items, function(item) return item end), items = items }
+end
+
 local function angleQuality(bins, config)
   return average(bins, function(sample)
     return U.clamp(
@@ -1409,9 +1516,10 @@ end
 
 -- Fluidity (10): the car settled and flowing (few abrupt steering, throttle
 -- and angle corrections), plus smooth lock-to-lock transitions where the
--- course has them. Commitment (5): pace, keeping it (no big speed drops)
--- and consistent throttle.
-local function styleQuality(active, course, config)
+-- course has them, plus accuracy to the accel/decel map where the layout
+-- has one. Commitment (5): pace, keeping it (no big speed drops) and
+-- consistent throttle.
+local function styleQuality(active, course, config, map)
   local pace = average(active, function(sample)
     return U.clamp(sample.speedKmh / config.targetSpeedKmh, 0, 1)
   end)
@@ -1435,6 +1543,10 @@ local function styleQuality(active, course, config)
   local transitions = transitionQuality(course, config)
   local fluidity = transitions == nil and settled
     or settled * (1 - config.fluidityTransitionWeight) + transitions * config.fluidityTransitionWeight
+  if map then
+    local weight = U.clamp(config.fluidityMapWeight, 0, 1)
+    fluidity = fluidity * (1 - weight) + map.average * weight
+  end
 
   local speeds = {}
   for _, sample in ipairs(active) do speeds[#speeds + 1] = sample.speedKmh end
@@ -1489,7 +1601,8 @@ function M.scoreLead(samples, layout, config, penalties, invalid, reason)
   local clips = innerClipQuality(bins, layout, config)
   local lineValue = lineQuality(path, zones, clips, config)
   local angleValue = angleQuality(active, config)
-  local style = styleQuality(active, course, config)
+  local map = mapAccuracy(bins, M.speedZoneRanges(layout), config)
+  local style = styleQuality(active, course, config, map)
   local engaged = engagement(active, config)
   local start = initiationQuality(bins, config)
   local line = config.leadLinePoints * lineValue
@@ -1529,6 +1642,8 @@ function M.scoreLead(samples, layout, config, penalties, invalid, reason)
     angleQuality = angleValue * 100,
     speedQuality = style.speed * engaged * 100,
     fluidityQuality = style.fluidity * engaged * 100,
+    mapQuality = map and map.average * 100 or nil,
+    mapZoneQualities = map and percentageItems(map.items) or {},
     exactWheelCoverage = average(bins, function(sample) return sample.exactWheelCoverage or 0 end) * 100,
     valid = true,
     reason = 'Válida'
@@ -1987,6 +2102,8 @@ function M:sample(nowMilliseconds)
     velocity = velocity,
     steerAngle = U.round(U.clamp(((tonumber(car.steer) or 0) / steerLock + 1) * 127.5, 0, 255)),
     gas = U.round(U.clamp((tonumber(car.gas) or 0) * 255, 0, 255)),
+    brake = U.round(U.clamp((tonumber(car.brake) or 0) * 255, 0, 255)),
+    handbrake = U.round(U.clamp((tonumber(car.handbrake) or 0) * 255, 0, 255)),
     signedAngleDeg = signedAngle,
     angleDeg = math.abs(signedAngle),
     speedKmh = math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z) * 3.6,
@@ -2067,6 +2184,9 @@ function M:beginRun()
   self.runElapsed, self.sampleAccumulator = 0, 0
   self.ruleSince, self.ruleFired, self.driftEngaged, self.launched = {}, {}, false, false
   self.courseLength = routeLength(self.context.layout.pathWaypoints)
+  self.speedZoneRanges = Scoring.speedZoneRanges(self.context.layout)
+  self.mapLength = G.pathLength(self.context.layout.pathWaypoints)
+  self.speedZone = nil
   self:resetProgress()
   local first = self:sample(0)
   self.previousPosition = first and first.position or nil
@@ -2143,6 +2263,13 @@ function M:checkInvalid(sample)
     self:deduct('tireOff', flow.tireOffDeduction, 'Roda fora da pista', now)
   end
 
+  -- Accel/decel map: a heavy footbrake or handbrake in a green zone.
+  self.speedZone = Scoring.speedZoneAt(self.speedZoneRanges, sample.progress.meters)
+  if self:episode('greenBrake', self.speedZone == 'green' and Scoring.heavyBraking(sample, scoring),
+    now, flow.greenBrakeGraceSeconds) then
+    self:deduct('greenBrake', flow.greenBrakeDeduction, 'Travou na zona verde', now)
+  end
+
   -- Stopping: only after the launch, so a slow reaction at "Vai!" isn't a stop
   -- (never launching at all is caught by the no-progress rule above).
   if sample.speedKmh >= flow.launchedSpeedKmh then self.launched = true end
@@ -2165,6 +2292,11 @@ function M:finish(reason)
     if deduction.kind == 'contact' then contacts = contacts + 1 end
   end
   score.contacts = score.valid and contacts or 0
+  local greenBrakes = 0
+  for _, deduction in ipairs(self.deductions) do
+    if deduction.kind == 'greenBrake' then greenBrakes = greenBrakes + 1 end
+  end
+  score.greenBrakes = score.valid and greenBrakes or 0
   context.lastResult = score
   self.resultAge = 0
   if physics.allowed() then physics.disableCarCollisions(0, false, false) end
@@ -2314,6 +2446,8 @@ function M.new(context)
     startRadius = D.editor.startRadiusMeters,
     finishWidth = D.editor.finishWidthMeters,
     clipRadius = D.editor.clipRadiusMeters,
+    speedKind = 'green',
+    speedDraft = nil,
     debug = false
   }, M)
 end
@@ -2431,6 +2565,65 @@ end
 function M:cancelOuter()
   self.outerDraft = {}
   self.context.status = 'Rascunho da zona exterior cancelado.'
+end
+
+M.speedKindNames = { green = 'Verde', orange = 'Laranja', red = 'Vermelha' }
+
+-- Accel/decel map: a zone runs along the route from one point to another.
+-- The first point waits in speedDraft until the second one closes the zone.
+function M:addSpeedPoint(position)
+  if not self.speedDraft then
+    self.speedDraft = U.copy(position)
+    self.context.status = 'Início da zona ' .. M.speedKindNames[self.speedKind]:lower() .. ' marcado. Marca agora o fim.'
+    return
+  end
+  self:pushUndo()
+  local zones = self.context.layout.speedZones
+  zones[#zones + 1] = { kind = self.speedKind, from = self.speedDraft, to = U.copy(position) }
+  self.speedDraft = nil
+  self:changed('Zona ' .. M.speedKindNames[self.speedKind]:lower() .. ' adicionada.')
+end
+
+function M:markSpeedPointAtCar()
+  local position = cloneCarPose()
+  if position then self:addSpeedPoint(position) end
+end
+
+function M:cancelSpeedDraft()
+  self.speedDraft = nil
+  self.context.status = 'Rascunho da zona cancelado.'
+end
+
+function M:clearSpeedZones()
+  if #self.context.layout.speedZones == 0 then return end
+  self:pushUndo()
+  self.context.layout.speedZones = {}
+  self:changed('Mapa de aceleração limpo.')
+end
+
+-- The endpoint (zone index and 'from'/'to') nearest to a point.
+function M:nearestSpeedPoint(point, radius)
+  local best, bestDistance = nil, radius * radius
+  for index, zone in ipairs(self.context.layout.speedZones) do
+    for _, side in ipairs({ 'from', 'to' }) do
+      local distance = distanceSquared(point, zone[side])
+      if distance <= bestDistance then best, bestDistance = { zone = index, side = side }, distance end
+    end
+  end
+  return best
+end
+
+-- The zone covering the route where a point is (clicked inside the corridor).
+function M:speedZoneAt(point)
+  local layout = self.context.layout
+  local progress = G.getProgress(layout.pathWaypoints, point)
+  if progress.distanceToPathMeters > layout.pathCorridorHalfWidthMeters + 2 then return nil end
+  for index, zone in ipairs(layout.speedZones) do
+    local a = G.getProgress(layout.pathWaypoints, zone.from).meters
+    local b = G.getProgress(layout.pathWaypoints, zone.to).meters
+    if progress.meters >= math.min(a, b) and progress.meters <= math.max(a, b) then return index end
+  end
+  return nil
 end
 
 function M:updateRecording()
@@ -2597,6 +2790,8 @@ function M:update3D()
       self.outerDraft[self.dragging.index] = U.copy(hit)
     elseif self.dragging.kind == 'outer' then
       self.context.layout.outerZones[self.dragging.zone].points[self.dragging.index] = U.copy(hit)
+    elseif self.dragging.kind == 'speed' then
+      self.context.layout.speedZones[self.dragging.zone][self.dragging.side] = U.copy(hit)
     end
     self.context.dirty = true
   end
@@ -2647,6 +2842,16 @@ function M:update3D()
             or { kind = 'outer', zone = target.zone, index = target.index }
         end
       end
+    elseif self.mode == 'speed' then
+      if ctrl then
+        self:addSpeedPoint(hit)
+      else
+        local target = self:nearestSpeedPoint(hit, 1)
+        if target then
+          self:pushUndo()
+          self.dragging = { kind = 'speed', zone = target.zone, side = target.side }
+        end
+      end
     elseif self.mode == 'clip' and ctrl then
       self:pushUndo()
       self.context.layout.innerClips[#self.context.layout.innerClips + 1] = {
@@ -2681,6 +2886,17 @@ function M:update3D()
           end
         end
       end
+    elseif self.mode == 'speed' then
+      if self.speedDraft then
+        self:cancelSpeedDraft()
+      else
+        local index = self:speedZoneAt(hit)
+        if index then
+          self:pushUndo()
+          table.remove(self.context.layout.speedZones, index)
+          self:changed('Zona do mapa de aceleração removida.')
+        end
+      end
     elseif self.mode == 'clip' then
       local index = self:nearestClip(hit, 1)
       if index then
@@ -2710,8 +2926,14 @@ local colors = {
   finish = rgbm(1, 0.9, 0.2, 1),
   outer = rgbm(1, 0.42, 0.05, 1),
   draft = rgbm(1, 0.1, 1, 1),
-  clip = rgbm(0.2, 1, 1, 1)
+  clip = rgbm(0.2, 1, 1, 1),
+  -- Accel/decel map, Drift Masters colours.
+  green = rgbm(0.15, 1, 0.3, 1),
+  orange = rgbm(1, 0.55, 0.05, 1),
+  red = rgbm(1, 0.12, 0.12, 1)
 }
+
+local speedZoneLabels = { green = 'VERDE · ACELERA', orange = 'LARANJA · PARCIAL', red = 'VERMELHA · TRAVA' }
 
 -- Palette pulled from driftfactory.pt, used for the score HUD specifically
 -- (not the 3D editor markers above, which keep their own scheme).
@@ -2788,6 +3010,31 @@ local function drawFinish(gate)
   label(gate.center, 'CHEGADA', colors.finish)
 end
 
+-- Accel/decel zones: the stretch of route painted along both corridor
+-- edges and the center, with a bar across each end.
+local function drawSpeedZones(layout)
+  local route = layout.pathWaypoints
+  if #route < 2 then return end
+  local half = layout.pathCorridorHalfWidthMeters
+  for _, zone in ipairs(layout.speedZones or {}) do
+    local color = colors[zone.kind]
+    local a = G.getProgress(route, zone.from).meters
+    local b = G.getProgress(route, zone.to).meters
+    local slice = G.pathSlice(route, math.min(a, b), math.max(a, b))
+    if color and #slice >= 2 then
+      local left, right = G.createOffsetPath(slice, half), G.createOffsetPath(slice, -half)
+      for index = 2, #slice do
+        line(left[index - 1], left[index], color, 0.1)
+        line(right[index - 1], right[index], color, 0.1)
+        line(slice[index - 1], slice[index], color, 0.1)
+      end
+      line(left[1], right[1], color, 0.1)
+      line(left[#left], right[#right], color, 0.1)
+      label(slice[1], speedZoneLabels[zone.kind], color)
+    end
+  end
+end
+
 function M.layout(context)
   local editor, layout = context.editor, context.layout
   -- Start and finish are always drawn: every player needs them to find
@@ -2802,6 +3049,7 @@ function M.layout(context)
   -- on "Mostrar zonas e clips". The route and its nodes are editor-only.
   if not (editor.debug or context.showCourse) then return end
   if editor.debug then drawRoute(layout) end
+  drawSpeedZones(layout)
   for zoneIndex, zone in ipairs(layout.outerZones) do
     if not editor.debug or editor:isOuterZoneVisible(zoneIndex) then
       for index, point in ipairs(zone.points) do
@@ -2822,6 +3070,9 @@ function M.layout(context)
   for index, point in ipairs(editor.outerDraft) do
     circle(point, 0.35, colors.draft)
     if index > 1 then line(editor.outerDraft[index - 1], point, colors.draft, 0.15) end
+  end
+  if editor.speedDraft then
+    circle(editor.speedDraft, 0.6, colors[editor.speedKind] or colors.draft)
   end
   if editor.mode ~= 'none' then
     local hit = editor:rayHit()
@@ -3032,7 +3283,8 @@ local function guide(context, p1)
     p1 + vec2(20, 57), vec2(p2.x - 12, p1.y + 71), 'Start', 'Center', BRAND.text, 'mono')
   textIn('3 rodas fora · Parar · Deixar de derrapar', 10,
     p1 + vec2(20, 71), vec2(p2.x - 12, p1.y + 85), 'Start', 'Center', BRAND.text, 'mono')
-  textIn('Toques, rodas fora e correções descontam', 9,
+  textIn(#(layout.speedZones or {}) > 0 and 'Toques, rodas fora, correções, travar no verde: -pts'
+    or 'Toques, rodas fora e correções descontam', 9,
     p1 + vec2(20, 86), vec2(p2.x - 12, p1.y + 98), 'Start', 'Center', BRAND.muted, 'mono')
 end
 
@@ -3081,9 +3333,14 @@ function M.hud(context, windowMode)
       -- A deduction (contact, tire off, correction) flashes where the speed label sits.
       local sinceDeduction = session.lastDeductionAt and (session.runElapsed * 1000 - session.lastDeductionAt) or math.huge
       if sinceDeduction < 1500 then
-        local labels = { contact = 'TOQUE', tireOff = 'RODA FORA', straighten = 'CORREÇÃO' }
+        local labels = { contact = 'TOQUE', tireOff = 'RODA FORA', straighten = 'CORREÇÃO', greenBrake = 'TRAVOU' }
         textIn(string.format('%s -%d', labels[session.lastDeductionKind] or 'DEDUÇÃO', session.lastDeductionPoints or 0), 10,
           p1 + vec2(129, 48), p1 + vec2(214, 62), 'Start', 'Center', BRAND.accent2, 'monoBold')
+      elseif session.speedZone then
+        -- Inside an accel/decel zone: what the zone asks for, in its colour.
+        local words = { green = 'ACELERA', orange = 'PARCIAL', red = 'TRAVA' }
+        textIn(words[session.speedZone], 10, p1 + vec2(129, 48), p1 + vec2(210, 62), 'Start', 'Center',
+          colors[session.speedZone], 'monoBold')
       else
         textIn('KM/H', 10, p1 + vec2(129, 48), p1 + vec2(210, 62), 'Start', 'Center', BRAND.muted, 'mono')
       end
@@ -3092,6 +3349,15 @@ function M.hud(context, windowMode)
       -- Course progress along the bottom edge.
       local barY = p2.y - 5
       fill(vec2(p1.x + 16, barY), vec2(p2.x - 10, barY + 3), rgbm(1, 1, 1, 0.10), 2)
+      -- The accel/decel map under it, so the next zone is visible coming up.
+      local length = session.mapLength or 0
+      if length > 0 then
+        for _, range in ipairs(session.speedZoneRanges or {}) do
+          local x1 = p1.x + 16 + (width - 26) * U.clamp(range.fromMeters / length, 0, 1)
+          local x2 = p1.x + 16 + (width - 26) * U.clamp(range.toMeters / length, 0, 1)
+          fill(vec2(x1, barY), vec2(math.max(x1 + 1, x2), barY + 3), withAlpha(colors[range.kind], 0.55), 0)
+        end
+      end
       fill(vec2(p1.x + 16, barY),
         vec2(p1.x + 16 + (width - 26) * U.clamp(sample.progress.normalized, 0, 1), barY + 3), accent, 2)
     end
@@ -3301,7 +3567,7 @@ local function runTab(context)
     wrapped(physics.allowed()
       and 'Conduz até ao círculo verde de partida e buzina. A app alinha o carro e começa uma contagem decrescente de cinco segundos. Arrancar antes do zero invalida a run.'
       or 'Para dentro do círculo verde de partida, virado para o percurso, e buzina. Começa uma contagem decrescente de cinco segundos. Arrancar antes do zero invalida a run.')
-    context.showCourse = select(1, checkbox('Mostrar zonas e clips na pista', context.showCourse))
+    context.showCourse = select(1, checkbox('Mostrar zonas, clips e mapa de aceleração', context.showCourse))
     local car = ac.getCar(0)
     if car and context.layout.leadStart then
       local inside = G.insideCircle(
@@ -3334,14 +3600,29 @@ local function runTab(context)
   ui.bulletText('Linha 60: zonas exteriores e clips, cada um vale o mesmo')
   ui.bulletText('Ângulo 20: ângulo alto e mantido nas zonas julgadas')
   ui.bulletText('Estilo 20: iniciação 5 · fluidez 10 · compromisso 5')
+  if #context.layout.speedZones > 0 then
+    ui.bulletText('Cumprir o mapa de aceleração vale 30% da fluidez')
+  end
 
   ui.newLine()
   heading('Deduções')
   ui.bulletText('Toque num muro ou carro: -5 · -10 (perdes 5 km/h) · -20 (15 km/h)')
   ui.bulletText('Roda fora da pista (1 ou 2 rodas): -5')
   ui.bulletText('Endireitar por instantes (correção): -5')
+  ui.bulletText('Travar a fundo ou travão de mão numa zona verde: -5')
   ui.bulletText('Dupla iniciação: 0 pontos de iniciação')
   muted('Zonas e clips falhados, fora da linha e falta de ângulo saem da própria pontuação.')
+
+  ui.newLine()
+  heading('Mapa de Aceleração')
+  if #context.layout.speedZones == 0 then
+    muted('Esta pista ainda não tem mapa de aceleração.')
+  else
+    ui.textColored('Verde: acelera ou mantém a velocidade, sem travar', rgbm(0.15, 1, 0.3, 1))
+    ui.textColored('Laranja: acelerador parcial ou pequeno ajuste, sem travar a fundo', rgbm(1, 0.55, 0.05, 1))
+    ui.textColored('Vermelha: podes abrandar com travão, travão de mão ou a soltar', rgbm(1, 0.25, 0.25, 1))
+    muted('Liga "Mostrar zonas, clips e mapa de aceleração" para as veres na pista.')
+  end
 
   ui.newLine()
   heading('A Run Fica Incompleta Se')
@@ -3448,6 +3729,31 @@ local function editorTab(context)
   editor.clipRadius = select(1, slider('Raio do clip', editor.clipRadius, 0.5, 8, '%.1f m'))
   if ui.button(editor.mode == 'clip' and 'Parar Ferramenta de Clips' or 'Colocar / Remover Clips') then editor:setMode('clip') end
   muted(string.format('%d clips. Ctrl+click coloca; botão direito remove.', #layout.innerClips))
+
+  ui.newLine()
+  heading('Mapa de Aceleração')
+  local kinds = { 'green', 'orange', 'red' }
+  for index, kind in ipairs(kinds) do
+    local name = editor.speedKindNames[kind]
+    if ui.button((editor.speedKind == kind and '* ' or '') .. name .. '##speedKind' .. kind) then
+      editor.speedKind = kind
+    end
+    if index < #kinds then sameLine() end
+  end
+  if ui.button(editor.mode == 'speed' and 'Parar Ferramenta do Mapa' or 'Desenhar / Editar Mapa') then editor:setMode('speed') end
+  sameLine()
+  if ui.button(editor.speedDraft and 'Fim da Zona no Carro' or 'Início da Zona no Carro') then editor:markSpeedPointAtCar() end
+  if editor.speedDraft then
+    sameLine()
+    if ui.button('Cancelar Zona') then editor:cancelSpeedDraft() end
+  end
+  sameLine()
+  if ui.button('Limpar Mapa') then editor:clearSpeedZones() end
+  local counts = { green = 0, orange = 0, red = 0 }
+  for _, zone in ipairs(layout.speedZones) do counts[zone.kind] = counts[zone.kind] + 1 end
+  muted(string.format('%d verdes, %d laranja, %d vermelhas. Ctrl+click marca o início e depois o fim; arrastar move uma ponta; botão direito na zona remove-a.',
+    counts.green, counts.orange, counts.red))
+  muted('Também podes conduzir e carregar em Início/Fim da Zona no Carro.')
 
   ui.newLine()
   heading('Visibilidade do Editor')
@@ -3659,6 +3965,7 @@ local function resultsTab(context)
       scoreLine('Qualidade da rota', run.pathQuality)
       scoreLine('Qualidade da zona', run.zoneQuality)
       scoreLine('Qualidade do clip', run.clipQuality)
+      if run.mapQuality then scoreLine('Mapa de aceleração', run.mapQuality) end
     end)
   end
 end
@@ -3676,7 +3983,7 @@ function M.window(context)
 
   ui.textColored('Drift Factory Judge App', rgbm(0.25, 0.8, 1, 1))
   sameLine()
-  muted('v0.3.0')
+  muted('v0.4.0')
   if isAdmin then
     sameLine()
     ui.textColored('ADMIN', BRAND.accent)

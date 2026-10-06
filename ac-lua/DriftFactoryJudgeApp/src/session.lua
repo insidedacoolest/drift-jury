@@ -173,6 +173,8 @@ function M:sample(nowMilliseconds)
     velocity = velocity,
     steerAngle = U.round(U.clamp(((tonumber(car.steer) or 0) / steerLock + 1) * 127.5, 0, 255)),
     gas = U.round(U.clamp((tonumber(car.gas) or 0) * 255, 0, 255)),
+    brake = U.round(U.clamp((tonumber(car.brake) or 0) * 255, 0, 255)),
+    handbrake = U.round(U.clamp((tonumber(car.handbrake) or 0) * 255, 0, 255)),
     signedAngleDeg = signedAngle,
     angleDeg = math.abs(signedAngle),
     speedKmh = math.sqrt(velocity.x * velocity.x + velocity.y * velocity.y + velocity.z * velocity.z) * 3.6,
@@ -253,6 +255,9 @@ function M:beginRun()
   self.runElapsed, self.sampleAccumulator = 0, 0
   self.ruleSince, self.ruleFired, self.driftEngaged, self.launched = {}, {}, false, false
   self.courseLength = routeLength(self.context.layout.pathWaypoints)
+  self.speedZoneRanges = Scoring.speedZoneRanges(self.context.layout)
+  self.mapLength = G.pathLength(self.context.layout.pathWaypoints)
+  self.speedZone = nil
   self:resetProgress()
   local first = self:sample(0)
   self.previousPosition = first and first.position or nil
@@ -329,6 +334,13 @@ function M:checkInvalid(sample)
     self:deduct('tireOff', flow.tireOffDeduction, 'Roda fora da pista', now)
   end
 
+  -- Accel/decel map: a heavy footbrake or handbrake in a green zone.
+  self.speedZone = Scoring.speedZoneAt(self.speedZoneRanges, sample.progress.meters)
+  if self:episode('greenBrake', self.speedZone == 'green' and Scoring.heavyBraking(sample, scoring),
+    now, flow.greenBrakeGraceSeconds) then
+    self:deduct('greenBrake', flow.greenBrakeDeduction, 'Travou na zona verde', now)
+  end
+
   -- Stopping: only after the launch, so a slow reaction at "Vai!" isn't a stop
   -- (never launching at all is caught by the no-progress rule above).
   if sample.speedKmh >= flow.launchedSpeedKmh then self.launched = true end
@@ -351,6 +363,11 @@ function M:finish(reason)
     if deduction.kind == 'contact' then contacts = contacts + 1 end
   end
   score.contacts = score.valid and contacts or 0
+  local greenBrakes = 0
+  for _, deduction in ipairs(self.deductions) do
+    if deduction.kind == 'greenBrake' then greenBrakes = greenBrakes + 1 end
+  end
+  score.greenBrakes = score.valid and greenBrakes or 0
   context.lastResult = score
   self.resultAge = 0
   if physics.allowed() then physics.disableCarCollisions(0, false, false) end

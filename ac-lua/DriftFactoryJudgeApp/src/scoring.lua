@@ -28,6 +28,8 @@ local function interpolate(a, b, t, targetProgress, pathLength, layout)
     velocity = interpolateVector(a.velocity, b.velocity, t),
     steerAngle = U.round(U.clamp(U.lerp(a.steerAngle, b.steerAngle, t), 0, 255)),
     gas = U.round(U.clamp(U.lerp(a.gas, b.gas, t), 0, 255)),
+    brake = U.round(U.clamp(U.lerp(a.brake or 0, b.brake or 0, t), 0, 255)),
+    handbrake = U.round(U.clamp(U.lerp(a.handbrake or 0, b.handbrake or 0, t), 0, 255)),
     signedAngleDeg = signedAngle,
     angleDeg = math.abs(signedAngle),
     speedKmh = U.lerp(a.speedKmh, b.speedKmh, t),
@@ -308,6 +310,63 @@ local function lineQuality(pathValue, zones, clips, config)
   return (total / count) * (1 - weight) + pathValue * weight
 end
 
+-- Accel/decel map: each zone as a stretch of the route, in meters along it.
+function M.speedZoneRanges(layout)
+  local ranges = {}
+  for _, zone in ipairs(layout.speedZones or {}) do
+    local a = G.getProgress(layout.pathWaypoints, zone.from).meters
+    local b = G.getProgress(layout.pathWaypoints, zone.to).meters
+    ranges[#ranges + 1] = { kind = zone.kind, fromMeters = math.min(a, b), toMeters = math.max(a, b) }
+  end
+  return ranges
+end
+
+-- The colour of the map at a point of the route ('green', 'orange', 'red' or nil).
+function M.speedZoneAt(ranges, meters)
+  for _, range in ipairs(ranges or {}) do
+    if meters >= range.fromMeters and meters <= range.toMeters then return range.kind end
+  end
+  return nil
+end
+
+function M.heavyBraking(sample, config)
+  return (sample.brake or 0) >= config.mapHeavyBrake * 255
+    or (sample.handbrake or 0) >= config.mapHeavyHandbrake * 255
+end
+
+-- Accuracy to the accel/decel map (Drift Masters 1.7, fluidity): the share
+-- of each green and orange zone driven the way its colour asks, every zone
+-- an equal share. Green: no heavy brakes, throttle on and no speed lost
+-- (beyond a small tolerance) from the zone's entry. Orange: no heavy brakes
+-- and only a small speed adjustment. Red zones aren't judged. nil when the
+-- layout has no green or orange zone.
+local function mapAccuracy(bins, ranges, config)
+  local items = {}
+  for _, range in ipairs(ranges) do
+    if range.kind == 'green' or range.kind == 'orange' then
+      local entry, total, good = nil, 0, 0
+      for _, sample in ipairs(bins) do
+        local at = sample.progress.meters
+        if at >= range.fromMeters and at <= range.toMeters then
+          entry = entry or sample.speedKmh
+          total = total + 1
+          local ok = not M.heavyBraking(sample, config)
+          if range.kind == 'green' then
+            ok = ok and (sample.gas or 0) >= config.mapGreenMinThrottle * 255
+              and sample.speedKmh >= entry - config.mapGreenSpeedToleranceKmh
+          else
+            ok = ok and sample.speedKmh >= entry - config.mapOrangeMaxDropKmh
+          end
+          if ok then good = good + 1 end
+        end
+      end
+      items[#items + 1] = total > 0 and good / total or 0
+    end
+  end
+  if #items == 0 then return nil end
+  return { average = average(items, function(item) return item end), items = items }
+end
+
 local function angleQuality(bins, config)
   return average(bins, function(sample)
     return U.clamp(
@@ -398,9 +457,10 @@ end
 
 -- Fluidity (10): the car settled and flowing (few abrupt steering, throttle
 -- and angle corrections), plus smooth lock-to-lock transitions where the
--- course has them. Commitment (5): pace, keeping it (no big speed drops)
--- and consistent throttle.
-local function styleQuality(active, course, config)
+-- course has them, plus accuracy to the accel/decel map where the layout
+-- has one. Commitment (5): pace, keeping it (no big speed drops) and
+-- consistent throttle.
+local function styleQuality(active, course, config, map)
   local pace = average(active, function(sample)
     return U.clamp(sample.speedKmh / config.targetSpeedKmh, 0, 1)
   end)
@@ -424,6 +484,10 @@ local function styleQuality(active, course, config)
   local transitions = transitionQuality(course, config)
   local fluidity = transitions == nil and settled
     or settled * (1 - config.fluidityTransitionWeight) + transitions * config.fluidityTransitionWeight
+  if map then
+    local weight = U.clamp(config.fluidityMapWeight, 0, 1)
+    fluidity = fluidity * (1 - weight) + map.average * weight
+  end
 
   local speeds = {}
   for _, sample in ipairs(active) do speeds[#speeds + 1] = sample.speedKmh end
@@ -478,7 +542,8 @@ function M.scoreLead(samples, layout, config, penalties, invalid, reason)
   local clips = innerClipQuality(bins, layout, config)
   local lineValue = lineQuality(path, zones, clips, config)
   local angleValue = angleQuality(active, config)
-  local style = styleQuality(active, course, config)
+  local map = mapAccuracy(bins, M.speedZoneRanges(layout), config)
+  local style = styleQuality(active, course, config, map)
   local engaged = engagement(active, config)
   local start = initiationQuality(bins, config)
   local line = config.leadLinePoints * lineValue
@@ -518,6 +583,8 @@ function M.scoreLead(samples, layout, config, penalties, invalid, reason)
     angleQuality = angleValue * 100,
     speedQuality = style.speed * engaged * 100,
     fluidityQuality = style.fluidity * engaged * 100,
+    mapQuality = map and map.average * 100 or nil,
+    mapZoneQualities = map and percentageItems(map.items) or {},
     exactWheelCoverage = average(bins, function(sample) return sample.exactWheelCoverage or 0 end) * 100,
     valid = true,
     reason = 'Válida'

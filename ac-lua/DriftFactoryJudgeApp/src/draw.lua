@@ -9,8 +9,14 @@ local colors = {
   finish = rgbm(1, 0.9, 0.2, 1),
   outer = rgbm(1, 0.42, 0.05, 1),
   draft = rgbm(1, 0.1, 1, 1),
-  clip = rgbm(0.2, 1, 1, 1)
+  clip = rgbm(0.2, 1, 1, 1),
+  -- Accel/decel map, Drift Masters colours.
+  green = rgbm(0.15, 1, 0.3, 1),
+  orange = rgbm(1, 0.55, 0.05, 1),
+  red = rgbm(1, 0.12, 0.12, 1)
 }
+
+local speedZoneLabels = { green = 'VERDE · ACELERA', orange = 'LARANJA · PARCIAL', red = 'VERMELHA · TRAVA' }
 
 -- Palette pulled from driftfactory.pt, used for the score HUD specifically
 -- (not the 3D editor markers above, which keep their own scheme).
@@ -87,6 +93,31 @@ local function drawFinish(gate)
   label(gate.center, 'CHEGADA', colors.finish)
 end
 
+-- Accel/decel zones: the stretch of route painted along both corridor
+-- edges and the center, with a bar across each end.
+local function drawSpeedZones(layout)
+  local route = layout.pathWaypoints
+  if #route < 2 then return end
+  local half = layout.pathCorridorHalfWidthMeters
+  for _, zone in ipairs(layout.speedZones or {}) do
+    local color = colors[zone.kind]
+    local a = G.getProgress(route, zone.from).meters
+    local b = G.getProgress(route, zone.to).meters
+    local slice = G.pathSlice(route, math.min(a, b), math.max(a, b))
+    if color and #slice >= 2 then
+      local left, right = G.createOffsetPath(slice, half), G.createOffsetPath(slice, -half)
+      for index = 2, #slice do
+        line(left[index - 1], left[index], color, 0.1)
+        line(right[index - 1], right[index], color, 0.1)
+        line(slice[index - 1], slice[index], color, 0.1)
+      end
+      line(left[1], right[1], color, 0.1)
+      line(left[#left], right[#right], color, 0.1)
+      label(slice[1], speedZoneLabels[zone.kind], color)
+    end
+  end
+end
+
 function M.layout(context)
   local editor, layout = context.editor, context.layout
   -- Start and finish are always drawn: every player needs them to find
@@ -101,6 +132,7 @@ function M.layout(context)
   -- on "Mostrar zonas e clips". The route and its nodes are editor-only.
   if not (editor.debug or context.showCourse) then return end
   if editor.debug then drawRoute(layout) end
+  drawSpeedZones(layout)
   for zoneIndex, zone in ipairs(layout.outerZones) do
     if not editor.debug or editor:isOuterZoneVisible(zoneIndex) then
       for index, point in ipairs(zone.points) do
@@ -121,6 +153,9 @@ function M.layout(context)
   for index, point in ipairs(editor.outerDraft) do
     circle(point, 0.35, colors.draft)
     if index > 1 then line(editor.outerDraft[index - 1], point, colors.draft, 0.15) end
+  end
+  if editor.speedDraft then
+    circle(editor.speedDraft, 0.6, colors[editor.speedKind] or colors.draft)
   end
   if editor.mode ~= 'none' then
     local hit = editor:rayHit()
@@ -331,7 +366,8 @@ local function guide(context, p1)
     p1 + vec2(20, 57), vec2(p2.x - 12, p1.y + 71), 'Start', 'Center', BRAND.text, 'mono')
   textIn('3 rodas fora · Parar · Deixar de derrapar', 10,
     p1 + vec2(20, 71), vec2(p2.x - 12, p1.y + 85), 'Start', 'Center', BRAND.text, 'mono')
-  textIn('Toques, rodas fora e correções descontam', 9,
+  textIn(#(layout.speedZones or {}) > 0 and 'Toques, rodas fora, correções, travar no verde: -pts'
+    or 'Toques, rodas fora e correções descontam', 9,
     p1 + vec2(20, 86), vec2(p2.x - 12, p1.y + 98), 'Start', 'Center', BRAND.muted, 'mono')
 end
 
@@ -380,9 +416,14 @@ function M.hud(context, windowMode)
       -- A deduction (contact, tire off, correction) flashes where the speed label sits.
       local sinceDeduction = session.lastDeductionAt and (session.runElapsed * 1000 - session.lastDeductionAt) or math.huge
       if sinceDeduction < 1500 then
-        local labels = { contact = 'TOQUE', tireOff = 'RODA FORA', straighten = 'CORREÇÃO' }
+        local labels = { contact = 'TOQUE', tireOff = 'RODA FORA', straighten = 'CORREÇÃO', greenBrake = 'TRAVOU' }
         textIn(string.format('%s -%d', labels[session.lastDeductionKind] or 'DEDUÇÃO', session.lastDeductionPoints or 0), 10,
           p1 + vec2(129, 48), p1 + vec2(214, 62), 'Start', 'Center', BRAND.accent2, 'monoBold')
+      elseif session.speedZone then
+        -- Inside an accel/decel zone: what the zone asks for, in its colour.
+        local words = { green = 'ACELERA', orange = 'PARCIAL', red = 'TRAVA' }
+        textIn(words[session.speedZone], 10, p1 + vec2(129, 48), p1 + vec2(210, 62), 'Start', 'Center',
+          colors[session.speedZone], 'monoBold')
       else
         textIn('KM/H', 10, p1 + vec2(129, 48), p1 + vec2(210, 62), 'Start', 'Center', BRAND.muted, 'mono')
       end
@@ -391,6 +432,15 @@ function M.hud(context, windowMode)
       -- Course progress along the bottom edge.
       local barY = p2.y - 5
       fill(vec2(p1.x + 16, barY), vec2(p2.x - 10, barY + 3), rgbm(1, 1, 1, 0.10), 2)
+      -- The accel/decel map under it, so the next zone is visible coming up.
+      local length = session.mapLength or 0
+      if length > 0 then
+        for _, range in ipairs(session.speedZoneRanges or {}) do
+          local x1 = p1.x + 16 + (width - 26) * U.clamp(range.fromMeters / length, 0, 1)
+          local x2 = p1.x + 16 + (width - 26) * U.clamp(range.toMeters / length, 0, 1)
+          fill(vec2(x1, barY), vec2(math.max(x1 + 1, x2), barY + 3), withAlpha(colors[range.kind], 0.55), 0)
+        end
+      end
       fill(vec2(p1.x + 16, barY),
         vec2(p1.x + 16 + (width - 26) * U.clamp(sample.progress.normalized, 0, 1), barY + 3), accent, 2)
     end

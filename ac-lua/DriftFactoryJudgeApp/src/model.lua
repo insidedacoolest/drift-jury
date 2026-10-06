@@ -3,6 +3,8 @@ local D = require('src.defaults')
 local P = require('src.profiles')
 local M = {}
 
+M.speedZoneKinds = { green = true, orange = true, red = true }
+
 local function normalizeStart(value)
   if type(value) ~= 'table' then return nil end
   value.position = U.vec(value.position)
@@ -151,6 +153,15 @@ function M.normalizeLayout(layout, track, layoutID)
     clip.position = U.vec(clip.position)
     clip.radiusMeters = tonumber(clip.radiusMeters) or D.editor.clipRadiusMeters
   end
+  -- Accel/decel map: sections of the route between two points, each green,
+  -- orange or red. Unknown colours are dropped.
+  local speedZones = {}
+  for _, zone in ipairs(U.ensureArray(layout.speedZones)) do
+    if type(zone) == 'table' and M.speedZoneKinds[zone.kind] and zone.from and zone.to then
+      speedZones[#speedZones + 1] = { kind = zone.kind, from = U.vec(zone.from), to = U.vec(zone.to) }
+    end
+  end
+  layout.speedZones = speedZones
   layout.lineupPairs = U.ensureArray(layout.lineupPairs)
   normalizeProfiles(layout)
   return layout
@@ -191,7 +202,8 @@ function M.toStorageLayout(layout)
     finishGate = copyGate(layout.finishGate),
     pathWaypoints = U.copy(layout.pathWaypoints),
     outerZones = U.copy(layout.outerZones),
-    innerClips = U.copy(layout.innerClips)
+    innerClips = U.copy(layout.innerClips),
+    speedZones = U.copy(layout.speedZones)
   }
   return result
 end

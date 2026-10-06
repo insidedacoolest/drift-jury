@@ -98,7 +98,7 @@ local function runTab(context)
     wrapped(physics.allowed()
       and 'Conduz até ao círculo verde de partida e buzina. A app alinha o carro e começa uma contagem decrescente de cinco segundos. Arrancar antes do zero invalida a run.'
       or 'Para dentro do círculo verde de partida, virado para o percurso, e buzina. Começa uma contagem decrescente de cinco segundos. Arrancar antes do zero invalida a run.')
-    context.showCourse = select(1, checkbox('Mostrar zonas e clips na pista', context.showCourse))
+    context.showCourse = select(1, checkbox('Mostrar zonas, clips e mapa de aceleração', context.showCourse))
     local car = ac.getCar(0)
     if car and context.layout.leadStart then
       local inside = G.insideCircle(
@@ -131,14 +131,29 @@ local function runTab(context)
   ui.bulletText('Linha 60: zonas exteriores e clips, cada um vale o mesmo')
   ui.bulletText('Ângulo 20: ângulo alto e mantido nas zonas julgadas')
   ui.bulletText('Estilo 20: iniciação 5 · fluidez 10 · compromisso 5')
+  if #context.layout.speedZones > 0 then
+    ui.bulletText('Cumprir o mapa de aceleração vale 30% da fluidez')
+  end
 
   ui.newLine()
   heading('Deduções')
   ui.bulletText('Toque num muro ou carro: -5 · -10 (perdes 5 km/h) · -20 (15 km/h)')
   ui.bulletText('Roda fora da pista (1 ou 2 rodas): -5')
   ui.bulletText('Endireitar por instantes (correção): -5')
+  ui.bulletText('Travar a fundo ou travão de mão numa zona verde: -5')
   ui.bulletText('Dupla iniciação: 0 pontos de iniciação')
   muted('Zonas e clips falhados, fora da linha e falta de ângulo saem da própria pontuação.')
+
+  ui.newLine()
+  heading('Mapa de Aceleração')
+  if #context.layout.speedZones == 0 then
+    muted('Esta pista ainda não tem mapa de aceleração.')
+  else
+    ui.textColored('Verde: acelera ou mantém a velocidade, sem travar', rgbm(0.15, 1, 0.3, 1))
+    ui.textColored('Laranja: acelerador parcial ou pequeno ajuste, sem travar a fundo', rgbm(1, 0.55, 0.05, 1))
+    ui.textColored('Vermelha: podes abrandar com travão, travão de mão ou a soltar', rgbm(1, 0.25, 0.25, 1))
+    muted('Liga "Mostrar zonas, clips e mapa de aceleração" para as veres na pista.')
+  end
 
   ui.newLine()
   heading('A Run Fica Incompleta Se')
@@ -245,6 +260,31 @@ local function editorTab(context)
   editor.clipRadius = select(1, slider('Raio do clip', editor.clipRadius, 0.5, 8, '%.1f m'))
   if ui.button(editor.mode == 'clip' and 'Parar Ferramenta de Clips' or 'Colocar / Remover Clips') then editor:setMode('clip') end
   muted(string.format('%d clips. Ctrl+click coloca; botão direito remove.', #layout.innerClips))
+
+  ui.newLine()
+  heading('Mapa de Aceleração')
+  local kinds = { 'green', 'orange', 'red' }
+  for index, kind in ipairs(kinds) do
+    local name = editor.speedKindNames[kind]
+    if ui.button((editor.speedKind == kind and '* ' or '') .. name .. '##speedKind' .. kind) then
+      editor.speedKind = kind
+    end
+    if index < #kinds then sameLine() end
+  end
+  if ui.button(editor.mode == 'speed' and 'Parar Ferramenta do Mapa' or 'Desenhar / Editar Mapa') then editor:setMode('speed') end
+  sameLine()
+  if ui.button(editor.speedDraft and 'Fim da Zona no Carro' or 'Início da Zona no Carro') then editor:markSpeedPointAtCar() end
+  if editor.speedDraft then
+    sameLine()
+    if ui.button('Cancelar Zona') then editor:cancelSpeedDraft() end
+  end
+  sameLine()
+  if ui.button('Limpar Mapa') then editor:clearSpeedZones() end
+  local counts = { green = 0, orange = 0, red = 0 }
+  for _, zone in ipairs(layout.speedZones) do counts[zone.kind] = counts[zone.kind] + 1 end
+  muted(string.format('%d verdes, %d laranja, %d vermelhas. Ctrl+click marca o início e depois o fim; arrastar move uma ponta; botão direito na zona remove-a.',
+    counts.green, counts.orange, counts.red))
+  muted('Também podes conduzir e carregar em Início/Fim da Zona no Carro.')
 
   ui.newLine()
   heading('Visibilidade do Editor')
@@ -456,6 +496,7 @@ local function resultsTab(context)
       scoreLine('Qualidade da rota', run.pathQuality)
       scoreLine('Qualidade da zona', run.zoneQuality)
       scoreLine('Qualidade do clip', run.clipQuality)
+      if run.mapQuality then scoreLine('Mapa de aceleração', run.mapQuality) end
     end)
   end
 end
@@ -473,7 +514,7 @@ function M.window(context)
 
   ui.textColored('Drift Factory Judge App', rgbm(0.25, 0.8, 1, 1))
   sameLine()
-  muted('v0.3.0')
+  muted('v0.4.0')
   if isAdmin then
     sameLine()
     ui.textColored('ADMIN', BRAND.accent)
