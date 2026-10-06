@@ -121,6 +121,15 @@ local function runTab(context)
   scoreLine('Ângulo de estilo (total)', context.scoring.styleFullDriftAngleDeg)
 
   ui.newLine()
+  heading('A Run Fica Inválida Se')
+  ui.bulletText('Arrancares antes do fim da contagem')
+  ui.bulletText('Andares no sentido contrário do percurso')
+  ui.bulletText('Endireitares o carro (ângulo zero) depois de começar o drift')
+  ui.bulletText('Saíres da pista com as quatro rodas')
+  ui.bulletText('Parares o carro')
+  ui.bulletText('Fizeres um trompo')
+
+  ui.newLine()
   heading('Recorde Pessoal')
   if context.results.personalBest then
     local best = context.results.personalBest

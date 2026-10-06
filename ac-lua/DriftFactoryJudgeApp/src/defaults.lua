@@ -7,7 +7,24 @@ M.flow = {
   spinAngleDeg = 105,
   spinGraceSeconds = 0.65,
   noProgressSeconds = 4,
-  noProgressMeters = 8
+  noProgressMeters = 8,
+  -- Each rule below invalidates the run once its condition has held for the
+  -- grace time, so a split-second blip (a transition, a bump) doesn't count.
+  -- Driving against the course direction (velocity pointing back along the route).
+  wrongWayMinSpeedKmh = 5,
+  wrongWayGraceSeconds = 0.5,
+  -- Straightening up: drift angle below this after the drift has started
+  -- (angle reached the minimum angle once), outside the finish exclusion.
+  -- The grace time lets a quick left/right transition pass through zero.
+  straightenAngleDeg = 5,
+  straightenGraceSeconds = 0.75,
+  -- Leaving the track: this many wheels outside the track's valid surface.
+  offTrackWheels = 4,
+  offTrackGraceSeconds = 0.25,
+  -- Stopping: speed below this, once the car has launched (passed launchedSpeedKmh).
+  launchedSpeedKmh = 15,
+  stopSpeedKmh = 5,
+  stopGraceSeconds = 1.0
 }
 
 M.scoring = {

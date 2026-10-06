@@ -29,6 +29,11 @@ Original DriftJudging SP: https://www.patreon.com/DeadEndReece/posts/driftjudges
   modules — see `online/README.md` at the repository root. Start and finish
   are now drawn on track for every player, not only in the editor's debug
   mode.
+- Stricter run rules: besides a spin or no progress, a run is invalid on a
+  jump start (moving during the countdown, instead of a 10-point penalty),
+  driving the wrong way, straightening up after the drift has started,
+  leaving the track with all four wheels, or stopping. Thresholds are in
+  `src/defaults.lua` (`M.flow`).
 - The score HUD uses the DriftFactory brand typefaces, bundled in `fonts/`:
   Saira (Copyright 2020 The Saira Project Authors, github.com/Omnibus-Type/Saira)
   and JetBrains Mono (Copyright 2020 The JetBrains Mono Project Authors,

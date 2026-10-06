@@ -120,8 +120,36 @@ function M:sample(nowMilliseconds)
     rearWheelRight = right,
     rearWheelLeftExact = leftWheel ~= nil,
     rearWheelRightExact = rightWheel ~= nil,
-    exactWheelCoverage = (leftWheel and 0.5 or 0) + (rightWheel and 0.5 or 0)
+    exactWheelCoverage = (leftWheel and 0.5 or 0) + (rightWheel and 0.5 or 0),
+    wheelsOutside = tonumber(car.wheelsOutside) or 0
   }
+end
+
+-- Unit direction of the route segment the car is on, flattened to the ground.
+local function courseDirection(path, segmentIndex)
+  local a, b = path[segmentIndex + 1], path[segmentIndex + 2]
+  if not a or not b then return nil end
+  local dx, dz = b.x - a.x, b.z - a.z
+  local length = math.sqrt(dx * dx + dz * dz)
+  if length < 0.01 then return nil end
+  return dx / length, dz / length
+end
+
+local function routeLength(path)
+  local total = 0
+  for index = 2, #path do total = total + G.distance3(path[index - 1], path[index]) end
+  return total
+end
+
+-- True once `condition` has held continuously for `graceSeconds`;
+-- timers are kept per rule in self.ruleSince.
+function M:sustained(rule, condition, now, graceSeconds)
+  if not condition then
+    self.ruleSince[rule] = nil
+    return false
+  end
+  self.ruleSince[rule] = self.ruleSince[rule] or now
+  return now - self.ruleSince[rule] >= graceSeconds * 1000
 end
 
 function M:beginCountdown()
@@ -141,6 +169,7 @@ function M:beginCountdown()
   self.countdownRemaining = D.flow.countdownSeconds
   self.samples, self.penalties, self.invalid, self.invalidReason = {}, 0, false, ''
   self.previousPosition, self.spinSince = nil, nil
+  self.ruleSince, self.driftEngaged = {}, false
   self:resetProgress()
   status(self, context.calibration.active and 'Contagem decrescente de calibração iniciada.' or 'Contagem decrescente iniciada.')
 end
@@ -148,6 +177,8 @@ end
 function M:beginRun()
   self.state = 'running'
   self.runElapsed, self.sampleAccumulator = 0, 0
+  self.ruleSince, self.driftEngaged, self.launched = {}, false, false
+  self.courseLength = routeLength(self.context.layout.pathWaypoints)
   self:resetProgress()
   local first = self:sample(0)
   self.previousPosition = first and first.position or nil
@@ -186,6 +217,39 @@ function M:checkInvalid(sample)
     if sample.timeMilliseconds - self.lastProgressChanged >= D.flow.noProgressSeconds * 1000 then
       self:markInvalid('Sem progresso no percurso')
     end
+  end
+
+  local now, flow, scoring = sample.timeMilliseconds, D.flow, self.context.scoring
+
+  -- Driving the wrong way: moving back along the route.
+  local dirX, dirZ = courseDirection(self.context.layout.pathWaypoints, sample.progress.segmentIndex or 0)
+  local horizontalSpeed = math.sqrt(sample.velocity.x * sample.velocity.x + sample.velocity.z * sample.velocity.z)
+  local backwards = dirX ~= nil and sample.speedKmh >= flow.wrongWayMinSpeedKmh and horizontalSpeed > 0
+    and (sample.velocity.x * dirX + sample.velocity.z * dirZ) / horizontalSpeed < -0.2
+  if self:sustained('wrongWay', backwards, now, flow.wrongWayGraceSeconds) then
+    self:markInvalid('Sentido contrário')
+  end
+
+  -- Straightening up: only once the drift has started, and not in the last
+  -- meters before the finish where drivers may straighten to cross it.
+  if sample.angleDeg >= scoring.minimumAngleDeg then self.driftEngaged = true end
+  local remaining = (self.courseLength or 0) - sample.progress.meters
+  -- A stopped car has no slip angle either; that case is reported as a stop.
+  local straight = self.driftEngaged and sample.angleDeg < flow.straightenAngleDeg
+    and sample.speedKmh >= flow.stopSpeedKmh and remaining > scoring.finishExclusionMeters
+  if self:sustained('straighten', straight, now, flow.straightenGraceSeconds) then
+    self:markInvalid('Endireitou o carro')
+  end
+
+  if self:sustained('offTrack', (sample.wheelsOutside or 0) >= flow.offTrackWheels, now, flow.offTrackGraceSeconds) then
+    self:markInvalid('Saiu da pista')
+  end
+
+  -- Stopping: only after the launch, so a slow reaction at "Vai!" isn't a stop
+  -- (never launching at all is caught by the no-progress rule above).
+  if sample.speedKmh >= flow.launchedSpeedKmh then self.launched = true end
+  if self:sustained('stop', self.launched and sample.speedKmh < flow.stopSpeedKmh, now, flow.stopGraceSeconds) then
+    self:markInvalid('Parou o carro')
   end
 end
 
