@@ -97,8 +97,8 @@ local function runTab(context)
     ui.newLine()
     ui.textColored('Pronto para uma run a solo', rgbm(0.2, 1, 0.35, 1))
     wrapped(physics.allowed()
-      and 'Conduz até ao círculo verde de partida e buzina. A app alinha o carro e começa uma contagem decrescente de cinco segundos.'
-      or 'Para dentro do círculo verde de partida, virado para o percurso, e buzina. Começa uma contagem decrescente de cinco segundos.')
+      and 'Conduz até ao círculo verde de partida e buzina. A app alinha o carro e começa uma contagem decrescente de cinco segundos. Arrancar antes do zero invalida a run.'
+      or 'Para dentro do círculo verde de partida, virado para o percurso, e buzina. Começa uma contagem decrescente de cinco segundos. Arrancar antes do zero invalida a run.')
     context.showCourse = select(1, checkbox('Mostrar zonas e clips na pista', context.showCourse))
     local car = ac.getCar(0)
     if car and context.layout.leadStart then

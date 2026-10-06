@@ -323,10 +323,8 @@ function M.hud(context, windowMode)
     -- low inside it.
     textIn(tostring(math.max(1, math.ceil(session.countdownRemaining))), 36,
       center - vec2(30, 33), center + vec2(30, 27), 'Center', 'Center', BRAND.text, 'number')
-    if session.penalties > 0 then
-      textIn(string.format('PARTIDA ANTECIPADA  −%d', session.penalties), 13,
-        p1 + vec2(24, height - 32), p1 + vec2(230, height - 10), 'Start', 'Center', BRAND.accent2, 'monoBold')
-    end
+    textIn('ARRANCAR ANTES INVALIDA', 13,
+      p1 + vec2(24, height - 32), p1 + vec2(230, height - 10), 'Start', 'Center', BRAND.accent2, 'monoBold')
   elseif session.state == 'running' then
     local sample = session.samples[#session.samples]
     local gaugeCenter, gaugeRadius = vec2(p2.x - 64, p1.y + 56), 34

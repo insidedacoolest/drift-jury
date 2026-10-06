@@ -260,10 +260,12 @@ function M:update(dt)
 
   if self.state == 'countdown' then
     self.countdownRemaining = self.countdownRemaining - dt
+    -- Moving off before the countdown ends voids the run outright.
     local speed = tonumber(car.speedKmh) or 0
-    if speed > D.flow.jumpStartSpeedKmh and self.penalties == 0 then
-      self.penalties = D.flow.jumpStartPenaltyPoints
-      status(self, 'Penalização de partida antecipada: -' .. D.flow.jumpStartPenaltyPoints)
+    if speed > D.flow.jumpStartSpeedKmh then
+      self:markInvalid('Partida antecipada')
+      self:finish('Partida antecipada')
+      return
     end
     if self.countdownRemaining <= 0 then self:beginRun() end
     return

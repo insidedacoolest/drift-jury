@@ -242,8 +242,7 @@ local M = {}
 M.flow = {
   countdownSeconds = 5,
   maxRunSeconds = 90,
-  jumpStartSpeedKmh = 8,
-  jumpStartPenaltyPoints = 10,
+  jumpStartSpeedKmh = 8, -- moving faster than this during the countdown invalidates the run
   spinAngleDeg = 105,
   spinGraceSeconds = 0.65,
   noProgressSeconds = 4,
@@ -1901,10 +1900,12 @@ function M:update(dt)
 
   if self.state == 'countdown' then
     self.countdownRemaining = self.countdownRemaining - dt
+    -- Moving off before the countdown ends voids the run outright.
     local speed = tonumber(car.speedKmh) or 0
-    if speed > D.flow.jumpStartSpeedKmh and self.penalties == 0 then
-      self.penalties = D.flow.jumpStartPenaltyPoints
-      status(self, 'Penalização de partida antecipada: -' .. D.flow.jumpStartPenaltyPoints)
+    if speed > D.flow.jumpStartSpeedKmh then
+      self:markInvalid('Partida antecipada')
+      self:finish('Partida antecipada')
+      return
     end
     if self.countdownRemaining <= 0 then self:beginRun() end
     return
@@ -2692,10 +2693,8 @@ function M.hud(context, windowMode)
     -- low inside it.
     textIn(tostring(math.max(1, math.ceil(session.countdownRemaining))), 36,
       center - vec2(30, 33), center + vec2(30, 27), 'Center', 'Center', BRAND.text, 'number')
-    if session.penalties > 0 then
-      textIn(string.format('PARTIDA ANTECIPADA  −%d', session.penalties), 13,
-        p1 + vec2(24, height - 32), p1 + vec2(230, height - 10), 'Start', 'Center', BRAND.accent2, 'monoBold')
-    end
+    textIn('ARRANCAR ANTES INVALIDA', 13,
+      p1 + vec2(24, height - 32), p1 + vec2(230, height - 10), 'Start', 'Center', BRAND.accent2, 'monoBold')
   elseif session.state == 'running' then
     local sample = session.samples[#session.samples]
     local gaugeCenter, gaugeRadius = vec2(p2.x - 64, p1.y + 56), 34
@@ -2850,8 +2849,8 @@ local function runTab(context)
     ui.newLine()
     ui.textColored('Pronto para uma run a solo', rgbm(0.2, 1, 0.35, 1))
     wrapped(physics.allowed()
-      and 'Conduz até ao círculo verde de partida e buzina. A app alinha o carro e começa uma contagem decrescente de cinco segundos.'
-      or 'Para dentro do círculo verde de partida, virado para o percurso, e buzina. Começa uma contagem decrescente de cinco segundos.')
+      and 'Conduz até ao círculo verde de partida e buzina. A app alinha o carro e começa uma contagem decrescente de cinco segundos. Arrancar antes do zero invalida a run.'
+      or 'Para dentro do círculo verde de partida, virado para o percurso, e buzina. Começa uma contagem decrescente de cinco segundos. Arrancar antes do zero invalida a run.')
     context.showCourse = select(1, checkbox('Mostrar zonas e clips na pista', context.showCourse))
     local car = ac.getCar(0)
     if car and context.layout.leadStart then
